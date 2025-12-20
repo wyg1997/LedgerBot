@@ -6,7 +6,9 @@ import (
 	"fmt"
 
 	"github.com/larksuite/oapi-sdk-go/v3"
+	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
+	larkwiki "github.com/larksuite/oapi-sdk-go/v3/service/wiki/v2"
 	"github.com/wyg1997/LedgerBot/config"
 	"github.com/wyg1997/LedgerBot/pkg/logger"
 )
@@ -165,4 +167,34 @@ func (s *FeishuService) ListRecords(appToken, tableToken string, pageSize, pageT
 func (s *FeishuService) ListRecordsWithFilter(appToken, tableToken string, filter map[string]interface{}) ([]map[string]interface{}, error) {
 	// TODO: Implement with SDK
 	return nil, fmt.Errorf("ListRecordsWithFilter not yet implemented with SDK")
+}
+
+// GetBitableAppTokenFromWikiNode 根据 wiki node_token 获取对应多维表格的 app_token
+// 通过调用 Wiki.V2.Space.GetNode 接口，读取返回的 node.obj_token 作为 app_token
+func (s *FeishuService) GetBitableAppTokenFromWikiNode(nodeToken string) (string, error) {
+	if nodeToken == "" {
+		return "", fmt.Errorf("node token is empty")
+	}
+
+	req := larkwiki.NewGetNodeSpaceReqBuilder().
+		Token(nodeToken).
+		ObjType("wiki").
+		Build()
+
+	resp, err := s.client.Wiki.V2.Space.GetNode(s.ctx, req, larkcore.WithTenantAccessTokenType())
+	if err != nil {
+		return "", fmt.Errorf("get wiki node failed: %w", err)
+	}
+
+	if !resp.Success() {
+		return "", fmt.Errorf("get wiki node failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	if resp.Data == nil || resp.Data.Node == nil || resp.Data.Node.ObjToken == nil {
+		return "", fmt.Errorf("get wiki node success but obj_token is empty")
+	}
+
+	appToken := *resp.Data.Node.ObjToken
+	s.log.Debug("Resolved wiki node %s to bitable app_token %s", nodeToken, appToken)
+	return appToken, nil
 }

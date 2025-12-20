@@ -19,15 +19,24 @@ type bitableBillRepository struct {
 	config        *config.FeishuConfig
 	logger        logger.Logger
 	appToken      string
-	tableToken    string
+	tableID       string
 }
 
 // NewBitableBillRepository creates a new bitable bill repository
 func NewBitableBillRepository(feishuService *feishu.FeishuService, config *config.FeishuConfig) (domain.BillRepository, error) {
-	// Parse the bitable URL to extract app token and table token
-	appToken, tableToken, err := parseBitableURL(config.BitableURL)
+	// Parse the bitable URL to extract node/app token and table id
+	rawToken, tableID, isWiki, err := parseBitableURL(config.BitableURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse bitable URL: %v", err)
+	}
+
+	appToken := rawToken
+	if isWiki {
+		// 当 URL 是 wiki 链接时，需要先通过 node_token 换取真正的 bitable app_token
+		appToken, err = feishuService.GetBitableAppTokenFromWikiNode(rawToken)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve bitable app token from wiki node: %v", err)
+		}
 	}
 
 	return &bitableBillRepository{
@@ -35,36 +44,41 @@ func NewBitableBillRepository(feishuService *feishu.FeishuService, config *confi
 		config:        config,
 		logger:        logger.GetLogger(),
 		appToken:      appToken,
-		tableToken:    tableToken,
+		tableID:       tableID,
 	}, nil
 }
 
-// parseBitableURL parses the bitable URL to extract app token and table token
-func parseBitableURL(bitableURL string) (string, string, error) {
+// parseBitableURL parses the bitable URL to extract token (node_token or app_token) and table id,
+// and returns whether this is a wiki node link.
+// 支持两种格式：
+// 1) base 链接: https://xxx.feishu.cn/base/APP_TOKEN?table=TABLE_ID
+// 2) wiki 链接: https://xxx.feishu.cn/wiki/NODE_TOKEN?table=TABLE_ID&view=...
+func parseBitableURL(bitableURL string) (token string, tableID string, isWiki bool, err error) {
 	if bitableURL == "" {
-		return "", "", fmt.Errorf("bitable URL is empty")
+		return "", "", false, fmt.Errorf("bitable URL is empty")
 	}
 
 	// Parse URL
 	u, err := url.Parse(bitableURL)
 	if err != nil {
-		return "", "", fmt.Errorf("invalid URL: %v", err)
+		return "", "", false, fmt.Errorf("invalid URL: %v", err)
 	}
 
-	// Extract app token from path
+	// Extract token from path
 	pathParts := strings.Split(strings.Trim(u.Path, "/"), "/")
 	if len(pathParts) < 2 || (pathParts[0] != "base" && pathParts[0] != "wiki") {
-		return "", "", fmt.Errorf("invalid bitable URL format, expected: https://example.feishu.cn/base/APP_TOKEN?table=TABLE_TOKEN or https://example.feishu.cn/wiki/APP_TOKEN?table=TABLE_TOKEN")
+		return "", "", false, fmt.Errorf("invalid bitable URL format, expected: https://example.feishu.cn/base/APP_TOKEN?table=TABLE_ID or https://example.feishu.cn/wiki/NODE_TOKEN?table=TABLE_ID")
 	}
-	appToken := pathParts[1]
+	token = pathParts[1]
+	isWiki = pathParts[0] == "wiki"
 
-	// Extract table token from query parameters
-	tableToken := u.Query().Get("table")
-	if tableToken == "" {
-		return "", "", fmt.Errorf("table token not found in URL")
+	// Extract table id from query parameters
+	tableID = u.Query().Get("table")
+	if tableID == "" {
+		return "", "", isWiki, fmt.Errorf("table id not found in URL")
 	}
 
-	return appToken, tableToken, nil
+	return token, tableID, isWiki, nil
 }
 
 // CreateBill creates a new bill in bitable
@@ -180,9 +194,9 @@ func (r *bitableBillRepository) ListBills(username string, startDate, endDate *t
 	// Date range filter
 	if startDate != nil || endDate != nil {
 		dateCondition := map[string]interface{}{
-			"field_name":      r.config.FieldDate,
-			"operator":        "is_within",
-			"field_type":      5, // Date field type
+			"field_name": r.config.FieldDate,
+			"operator":   "is_within",
+			"field_type": 5, // Date field type
 		}
 
 		if startDate != nil && endDate != nil {
@@ -220,7 +234,7 @@ func (r *bitableBillRepository) ListBills(username string, startDate, endDate *t
 	// Query records
 	records, err := r.feishuService.ListRecordsWithFilter(
 		r.appToken,
-		r.tableToken,
+		r.tableID,
 		filter,
 	)
 
