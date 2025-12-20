@@ -111,13 +111,6 @@ func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string) {
 
 	userName, err := h.ensureUser(openID, messageID)
 	if err != nil {
-		if err.Error() == "unknown user" {
-			// User needs to provide name, send to AI with empty name
-			h.processWithoutUsername(openID, text, messageID)
-			return
-		}
-		// Other errors, show generic message
-		_ = h.feishuService.ReplyMessage(messageID, "系统错误，请稍后再试", uuid.New().String())
 		return
 	}
     h.logger.Info("用户名: %s", userName)
@@ -361,27 +354,4 @@ func (h *FeishuHandlerAITools) handleIMMessage(w http.ResponseWriter, payload ma
 	h.logger.Debug("=== IM message queued for processing ===")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("success"))
-}
-
-// processWithoutUsername sends the message to AI with empty username for preliminary processing
-func (h *FeishuHandlerAITools) processWithoutUsername(openID, text, messageID string) {
-	h.logger.Info("Process without user name for openID: %s, text: %s", openID, text)
-
-	// Create rename service wrapper
-	renameFunc := func(name string) error {
-		return h.userMappingRepo.SetUserName(openID, name)
-	}
-	renameService := ai.NewRenameService(openID, renameFunc)
-
-	// Execute with empty userName, so AI will realize user needs to set name
-	response, err := h.aiservice.Execute(text, "", nil, renameService)
-	if err != nil {
-		h.logger.Error("AI execution: %v", err)
-		errMsg := fmt.Sprintf("处理失败：%v", err)
-		_ = h.feishuService.ReplyMessage(messageID, errMsg, uuid.New().String())
-		return
-	}
-
-	// Send response back to user
-	_ = h.feishuService.ReplyMessage(messageID, response, uuid.New().String())
 }

@@ -32,6 +32,7 @@ func NewFeishuService(cfg *config.FeishuConfig) *FeishuService {
 
 // ReplyMessage replies to a message in thread
 func (s *FeishuService) ReplyMessage(messageID string, content string, uuid string) error {
+    s.log.Debug("Will reply message: %s, message_id: %s", content, messageID)
 	// Create text content as JSON string, escape quotes
 	escapedContent := strings.ReplaceAll(content, `"`, `\"`)
 	textContent := fmt.Sprintf(`{"text":"%s"}`, escapedContent)
@@ -64,6 +65,7 @@ func (s *FeishuService) ReplyMessage(messageID string, content string, uuid stri
 
 // SendMessage sends a message to a user
 func (s *FeishuService) SendMessage(openID string, content string) error {
+    s.log.Debug("Will send message: %s to %s", content, openID)
 	// Create text content as JSON string, escape quotes
 	escapedContent := strings.ReplaceAll(content, `"`, `\"`)
 	textContent := fmt.Sprintf(`{"text":"%s"}`, escapedContent)
