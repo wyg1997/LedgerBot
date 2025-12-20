@@ -93,12 +93,15 @@ func (r *bitableBillRepository) CreateBill(bill *domain.Bill) error {
 		billType = "收入"
 	}
 
+	// 日期需要转换为毫秒时间戳
+	dateTimestamp := bill.Date.UnixMilli()
+
 	fields := map[string]interface{}{
 		r.config.FieldDescription: bill.Description,
 		r.config.FieldAmount:      bill.Amount,
 		r.config.FieldType:        billType,
 		r.config.FieldCategory:    bill.Category,
-		r.config.FieldDate:        bill.Date.Format("2006-01-02 15:04:05"),
+		r.config.FieldDate:        dateTimestamp,
 		r.config.FieldUserName:    bill.UserName,
 	}
 
@@ -321,13 +324,21 @@ func (r *bitableBillRepository) convertRecordToBill(record map[string]interface{
 		OriginalMsg: getStringField(fields, r.config.FieldOriginalMsg),
 	}
 
-	// Parse date
-	if dateStr := getStringField(fields, r.config.FieldDate); dateStr != "" {
-		if t, err := time.Parse("2006-01-02 15:04:05", dateStr); err == nil {
-			bill.Date = t
-		} else if t, err := time.Parse("2006-01-02", dateStr); err == nil {
-			// Backward compatibility: also try parsing date-only format
-			bill.Date = t
+	// Parse date - 支持毫秒时间戳（新格式）和字符串格式（向后兼容）
+	if dateVal, ok := fields[r.config.FieldDate]; ok {
+		if dateTimestamp, ok := dateVal.(int64); ok {
+			// 毫秒时间戳格式
+			bill.Date = time.UnixMilli(dateTimestamp)
+		} else if dateTimestamp, ok := dateVal.(float64); ok {
+			// 处理 JSON 数字可能被解析为 float64 的情况
+			bill.Date = time.UnixMilli(int64(dateTimestamp))
+		} else if dateStr, ok := dateVal.(string); ok && dateStr != "" {
+			// 向后兼容：字符串格式
+			if t, err := time.Parse("2006-01-02 15:04:05", dateStr); err == nil {
+				bill.Date = t
+			} else if t, err := time.Parse("2006-01-02", dateStr); err == nil {
+				bill.Date = t
+			}
 		}
 	}
 

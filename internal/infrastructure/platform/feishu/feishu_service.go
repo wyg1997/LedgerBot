@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/larksuite/oapi-sdk-go/v3"
+	larkbitable "github.com/larksuite/oapi-sdk-go/v3/service/bitable/v1"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkwiki "github.com/larksuite/oapi-sdk-go/v3/service/wiki/v2"
 	"github.com/wyg1997/LedgerBot/config"
@@ -152,10 +153,32 @@ func (s *FeishuService) ProcessMessageCallback(callback MessageCallback) (string
 	return "success", nil
 }
 
-// Placeholder methods for compatibility - these would need to be fully migrated to SDK
-func (s *FeishuService) AddRecordToBitable(appToken, tableToken string, fields map[string]interface{}) (string, error) {
-	// TODO: Implement with SDK
-	return "", fmt.Errorf("AddRecordToBitable not yet implemented with SDK")
+// AddRecordToBitable 使用 Bitable SDK 创建记录
+func (s *FeishuService) AddRecordToBitable(appToken, tableID string, fields map[string]interface{}) (string, error) {
+	req := larkbitable.NewCreateAppTableRecordReqBuilder().
+		AppToken(appToken).
+		TableId(tableID).
+		AppTableRecord(larkbitable.NewAppTableRecordBuilder().
+			Fields(fields).
+			Build()).
+		Build()
+
+	resp, err := s.client.Bitable.V1.AppTableRecord.Create(s.ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("create bitable record failed: %w", err)
+	}
+
+	if !resp.Success() {
+		return "", fmt.Errorf("create bitable record failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	if resp.Data == nil || resp.Data.Record == nil || resp.Data.Record.RecordId == nil {
+		return "", fmt.Errorf("create bitable record success but record_id is empty")
+	}
+
+	recordID := *resp.Data.Record.RecordId
+	s.log.Debug("Created bitable record: RecordID=%s, AppToken=%s, TableID=%s", recordID, appToken, tableID)
+	return recordID, nil
 }
 
 func (s *FeishuService) ListRecords(appToken, tableToken string, pageSize, pageToken int) ([]map[string]interface{}, error) {
