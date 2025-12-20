@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/wyg1997/LedgerBot/config"
 	"github.com/wyg1997/LedgerBot/internal/domain"
 	"github.com/wyg1997/LedgerBot/internal/infrastructure/ai"
 	"github.com/wyg1997/LedgerBot/internal/infrastructure/platform/feishu"
@@ -221,7 +222,7 @@ func (h *FeishuHandlerAITools) handleIMMessage(w http.ResponseWriter, payload ma
 	h.logger.Debug("Message info - chat_id: %s, chat_type: %s, message_type: %s", chatID, chatType, messageType)
 
 	// Extract sender info
-	sender := getMap(message, "sender")
+	sender := getMap(event, "sender")
 	if sender == nil {
 		h.logger.Debug("No sender found in message")
 		w.Write([]byte("ok"))
