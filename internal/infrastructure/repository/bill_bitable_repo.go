@@ -109,7 +109,7 @@ func (r *bitableBillRepository) CreateBill(bill *domain.Bill) error {
 
 	recordID, err := r.feishuService.AddRecordToBitable(
 		r.appToken,
-		r.tableToken,
+		r.tableID,
 		fields,
 	)
 

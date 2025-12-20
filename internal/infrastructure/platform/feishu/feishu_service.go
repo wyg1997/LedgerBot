@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/larksuite/oapi-sdk-go/v3"
-	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkwiki "github.com/larksuite/oapi-sdk-go/v3/service/wiki/v2"
 	"github.com/wyg1997/LedgerBot/config"
@@ -181,7 +180,8 @@ func (s *FeishuService) GetBitableAppTokenFromWikiNode(nodeToken string) (string
 		ObjType("wiki").
 		Build()
 
-	resp, err := s.client.Wiki.V2.Space.GetNode(s.ctx, req, larkcore.WithTenantAccessTokenType())
+	// 对于自建应用，使用 tenant access token 即可，SDK 会自动处理，无需额外选项
+	resp, err := s.client.Wiki.V2.Space.GetNode(s.ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("get wiki node failed: %w", err)
 	}
