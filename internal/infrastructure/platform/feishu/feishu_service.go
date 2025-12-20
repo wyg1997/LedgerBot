@@ -2,8 +2,8 @@ package feishu
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/larksuite/oapi-sdk-go/v3"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
@@ -32,16 +32,20 @@ func NewFeishuService(cfg *config.FeishuConfig) *FeishuService {
 
 // ReplyMessage replies to a message in thread
 func (s *FeishuService) ReplyMessage(messageID string, content string, uuid string) error {
-    s.log.Debug("Will reply message: %s, message_id: %s", content, messageID)
-	// Create text content as JSON string, escape quotes
-	escapedContent := strings.ReplaceAll(content, `"`, `\"`)
-	textContent := fmt.Sprintf(`{"text":"%s"}`, escapedContent)
+	s.log.Debug("Will reply message: %s, message_id: %s", content, messageID)
+
+	// Create a map with the text content and marshal it to JSON
+	messageMap := map[string]string{"text": content}
+	textContent, err := json.Marshal(messageMap)
+	if err != nil {
+		return fmt.Errorf("failed to marshal message content: %v", err)
+	}
 
 	// Create reply request
 	req := larkim.NewReplyMessageReqBuilder().
 		MessageId(messageID).
 		Body(larkim.NewReplyMessageReqBodyBuilder().
-			Content(textContent).
+			Content(string(textContent)).
 			MsgType("text").
 			Uuid(uuid).
 			ReplyInThread(true).
@@ -56,9 +60,9 @@ func (s *FeishuService) ReplyMessage(messageID string, content string, uuid stri
 
 	// Check response code
 	if !resp.Success() {
-        s.log.Error("Replay error: %s, code: %s", resp.Code, resp.Msg)
+		s.log.Error("Reply error: %s, code: %s", resp.Code, resp.Msg)
 		return fmt.Errorf("failed to reply message: code=%d, msg=%s", resp.Code, resp.Msg)
-    }
+	}
 
 	s.log.Debug("Successfully replied to message %s", messageID)
 	return nil
@@ -66,17 +70,21 @@ func (s *FeishuService) ReplyMessage(messageID string, content string, uuid stri
 
 // SendMessage sends a message to a user
 func (s *FeishuService) SendMessage(openID string, content string) error {
-    s.log.Debug("Will send message: %s to %s", content, openID)
-	// Create text content as JSON string, escape quotes
-	escapedContent := strings.ReplaceAll(content, `"`, `\"`)
-	textContent := fmt.Sprintf(`{"text":"%s"}`, escapedContent)
+	s.log.Debug("Will send message: %s to %s", content, openID)
+
+	// Create a map with the text content and marshal it to JSON
+	messageMap := map[string]string{"text": content}
+	textContent, err := json.Marshal(messageMap)
+	if err != nil {
+		return fmt.Errorf("failed to marshal message content: %v", err)
+	}
 
 	// Create message request
 	req := larkim.NewCreateMessageReqBuilder().
 		ReceiveIdType("open_id").
 		Body(larkim.NewCreateMessageReqBodyBuilder().
 			ReceiveId(openID).
-			Content(textContent).
+			Content(string(textContent)).
 			MsgType("text").
 			Build()).
 		Build()
