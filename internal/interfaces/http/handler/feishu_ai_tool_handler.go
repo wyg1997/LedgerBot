@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	"github.com/wyg1997/LedgerBot/config"
 	"github.com/wyg1997/LedgerBot/internal/domain"
 	"github.com/wyg1997/LedgerBot/internal/infrastructure/ai"
@@ -44,15 +45,15 @@ func NewFeishuHandlerAITools(
 }
 
 // ExecuteFunc creates the service wrappers for AI execution
-func (h *FeishuHandlerAITools) ExecuteFunc(openID string, userName string, renameFunc func(string) error) func(string, string, domain.BillUseCase, func(string) error) (string, error) {
-	return func(input string, name string, billUseCase domain.BillUseCase, renameFunc func(string) error) (string, error) {
+func (h *FeishuHandlerAITools) ExecuteFunc(openID string, userName string, renameFunc func(string) error) func(string, string, domain.BillUseCase, func(string) error, []domain.AIMessage) (string, error) {
+	return func(input string, name string, billUseCase domain.BillUseCase, renameFunc func(string) error, history []domain.AIMessage) (string, error) {
 		// Create bill service wrapper - use a default user ID since we don't track users anymore
 		billService := ai.NewBillService(billUseCase, openID, name)
 		// Create rename service wrapper
-		renameService := ai.NewRenameService(openID, renameFunc)
+		renameService := ai.NewRenameService(renameFunc)
 
 		// Call the proper Execute method
-		return h.aiservice.Execute(input, name, billService, renameService)
+		return h.aiservice.Execute(input, name, billService, renameService, history)
 	}
 }
 
@@ -106,14 +107,14 @@ func (h *FeishuHandlerAITools) Webhook(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ok"))
 }
 
-func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string) {
+func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string, history []domain.AIMessage) {
 	h.logger.Info("Processing from %s: %s", openID, text)
 
 	userName, err := h.ensureUser(openID, messageID)
 	if err != nil {
 		return
 	}
-    h.logger.Info("用户名: %s", userName)
+	h.logger.Info("用户名: %s", userName)
 
 	// Rename function - simplifies to just updating stored name
 	renameFunc := func(name string) error {
@@ -122,7 +123,7 @@ func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string) {
 
 	// Execute via tool service
 	toolService := h.ExecuteFunc(openID, userName, renameFunc)
-	response, err := toolService(text, userName, h.billUseCase, renameFunc)
+	response, err := toolService(text, userName, h.billUseCase, renameFunc, history)
 	if err != nil {
 		h.logger.Error("AI execution: %v", err)
 		// Use ReplyMessage with UUID for error response
@@ -139,7 +140,7 @@ func (h *FeishuHandlerAITools) ensureUser(openID, messageID string) (string, err
 	// Try to get user name from mapping
 	userName, err := h.userMappingRepo.GetUserName(openID)
 	if err == nil {
-        h.logger.Debug("获取用户映射: %s -> %s", openID, userName)
+		h.logger.Debug("获取用户映射: %s -> %s", openID, userName)
 		return userName, nil
 	}
 
@@ -177,6 +178,118 @@ func getObjectKeys(m map[string]interface{}) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// checkAndStripMention 判断当前消息是否@Bot并去掉文本中的@占位
+func (h *FeishuHandlerAITools) checkAndStripMention(text string, message map[string]interface{}, botName string) (bool, string) {
+	mentions := message["mentions"]
+	if mentions == nil {
+		return false, text
+	}
+	mentionList, ok := mentions.([]interface{})
+	if !ok || len(mentionList) == 0 {
+		return false, text
+	}
+
+	for _, mention := range mentionList {
+		mentionMap, ok := mention.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name := getString(mentionMap, "name")
+		mentionKey := getString(mentionMap, "key")
+
+		if name == botName {
+			if mentionKey != "" && strings.Contains(text, mentionKey) {
+				text = strings.TrimSpace(strings.Replace(text, mentionKey, "", 1))
+			}
+			return true, text
+		}
+	}
+
+	return false, text
+}
+
+// firstMessageMentionsBot 判断线程第一条消息是否@了机器人
+func (h *FeishuHandlerAITools) firstMessageMentionsBot(messages []*larkim.Message, botName string) bool {
+	if len(messages) == 0 {
+		return false
+	}
+
+	return h.messageMentionsBot(messages[0], botName)
+}
+
+// messageMentionsBot 判断单条消息的mentions中是否包含Bot
+func (h *FeishuHandlerAITools) messageMentionsBot(msg *larkim.Message, botName string) bool {
+	if msg == nil || msg.Mentions == nil {
+		return false
+	}
+
+	for _, mention := range msg.Mentions {
+		if mention == nil || mention.Name == nil {
+			continue
+		}
+		if *mention.Name == botName {
+			return true
+		}
+	}
+
+	return false
+}
+
+// buildAIHistoryFromThread 构建AI上下文，映射sender_type到角色
+func (h *FeishuHandlerAITools) buildAIHistoryFromThread(messages []*larkim.Message, botName string) []domain.AIMessage {
+	history := make([]domain.AIMessage, 0, len(messages))
+
+	for _, msg := range messages {
+		if msg == nil {
+			continue
+		}
+
+		if msg.Deleted != nil && *msg.Deleted {
+			continue
+		}
+
+		body := msg.Body
+		if body == nil || body.Content == nil {
+			continue
+		}
+
+		var contentObj map[string]interface{}
+		if err := json.Unmarshal([]byte(*body.Content), &contentObj); err != nil {
+			continue
+		}
+
+		text := getString(contentObj, "text")
+		if text == "" {
+			continue
+		}
+
+		// 去掉@Bot的key，避免AI误判
+		if h.messageMentionsBot(msg, botName) && msg.Mentions != nil {
+			for _, mention := range msg.Mentions {
+				if mention == nil || mention.Key == nil {
+					continue
+				}
+				if strings.Contains(text, *mention.Key) {
+					text = strings.TrimSpace(strings.Replace(text, *mention.Key, "", 1))
+					break
+				}
+			}
+		}
+
+		role := "user"
+		if msg.Sender != nil && msg.Sender.SenderType != nil && *msg.Sender.SenderType == "app" {
+			role = "assistant"
+		}
+
+		history = append(history, domain.AIMessage{
+			Role:    role,
+			Content: text,
+		})
+	}
+
+	return history
 }
 
 // handleIMMessage handles the new IM message format (im.message.receive_v1)
@@ -269,76 +382,46 @@ func (h *FeishuHandlerAITools) handleIMMessage(w http.ResponseWriter, payload ma
 	}
 	h.logger.Debug("Extracted text: '%s'", text)
 
+	// Extract thread info and chat type
+	threadID := getString(message, "thread_id")
+	h.logger.Debug("Chat type: %s, thread_id: %s", chatType, threadID)
+
+	// Prepare history for AI
+	var historyMsgs []domain.AIMessage
+	var firstMentioned bool
+	botName := h.config.BotName
+
 	// Handle different chat types
-	h.logger.Debug("Chat type: %s", chatType)
 	switch chatType {
 	case "p2p":
-		// Private chat - no need to check mentions
+		// Private chat - no mention requirement
 		h.logger.Debug("Private chat detected, processing directly")
 	case "group", "pgroup", "sgroup":
-		// Group chat - need to check mentions
-		h.logger.Debug("Group chat detected, checking mentions")
+		h.logger.Debug("Group chat detected, checking mentions or thread context")
 
-		// Get mentions
-		mentions := message["mentions"]
-		if mentions == nil {
-			h.logger.Debug("No mentions field in group message")
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("success"))
-			return
-		}
+		mentioned, newText := h.checkAndStripMention(text, message, botName)
+		text = newText
 
-		mentionList, ok := mentions.([]interface{})
-		if !ok || len(mentionList) == 0 {
-			h.logger.Debug("No mentions or empty mentions array (type: %T)", mentions)
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("success"))
-			return
-		}
-
-		h.logger.Debug("Found %d mentions", len(mentionList))
-
-		// Check if bot is mentioned
-		mentioned := false
-		botName := h.config.BotName
-		h.logger.Debug("Bot name configured as: '%s'", botName)
-
-		for _, mention := range mentionList {
-			mentionMap, ok := mention.(map[string]interface{})
-			if !ok {
-				h.logger.Debug("Skipping invalid mention format (type: %T)", mention)
-				continue
-			}
-
-			// Check if this mention is for our bot
-			name := getString(mentionMap, "name")
-			mentionKey := getString(mentionMap, "key")
-			mentionOpenID := getString(getMap(mentionMap, "id"), "open_id")
-
-			h.logger.Debug("Checking mention - name: '%s', key: '%s', open_id: '%s'", name, mentionKey, mentionOpenID)
-
-			if name == botName {
-				mentioned = true
-				h.logger.Debug("Bot mentioned! Found mention with name: '%s'", name)
-
-				// Remove mention from text if key exists
-				if mentionKey != "" && strings.Contains(text, mentionKey) {
-					oldText := text
-					text = strings.TrimSpace(strings.Replace(text, mentionKey, "", 1))
-					h.logger.Debug("Removed mention key '%s' from text: '%s' -> '%s'", mentionKey, oldText, text)
-				}
-				break
+		// Try loading full thread history when thread_id exists
+		if threadID != "" {
+			threadMessages, err := h.feishuService.ListMessagesByThread(threadID)
+			if err != nil {
+				h.logger.Error("List thread messages failed: %v", err)
+			} else {
+				firstMentioned = h.firstMessageMentionsBot(threadMessages, botName)
+				historyMsgs = h.buildAIHistoryFromThread(threadMessages, botName)
+				h.logger.Debug("Loaded %d messages for history, firstMentioned=%v", len(historyMsgs), firstMentioned)
 			}
 		}
 
-		if !mentioned {
-			h.logger.Debug("Bot not mentioned, skipping message")
+		if !mentioned && !firstMentioned {
+			h.logger.Debug("Bot not mentioned and thread does not start with bot mention, skipping message")
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("success"))
 			return
 		}
 
-		h.logger.Debug("Bot mentioned, final text after removal: '%s'", text)
+		h.logger.Debug("Bot mention validated, final text: '%s'", text)
 	default:
 		h.logger.Debug("Unknown chat type '%s', still processing", chatType)
 	}
@@ -347,9 +430,15 @@ func (h *FeishuHandlerAITools) handleIMMessage(w http.ResponseWriter, payload ma
 	messageID := getString(message, "message_id")
 	h.logger.Debug("Message ID: %s", messageID)
 
+	// If we already built history, ensure latest user message text matches incoming text
+	if len(historyMsgs) > 0 && historyMsgs[len(historyMsgs)-1].Role != "assistant" {
+		// Replace last content with cleaned text to avoid mention key residue
+		historyMsgs[len(historyMsgs)-1].Content = text
+	}
+
 	// Process the message
 	h.logger.Debug("Processing message for open_id: %s, text: '%s'", openID, text)
-	go h.processMessage(openID, text, messageID)
+	go h.processMessage(openID, text, messageID, historyMsgs)
 
 	h.logger.Debug("=== IM message queued for processing ===")
 	w.WriteHeader(http.StatusOK)

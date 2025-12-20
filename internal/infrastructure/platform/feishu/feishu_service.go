@@ -68,6 +68,30 @@ func (s *FeishuService) ReplyMessage(messageID string, content string, uuid stri
 	return nil
 }
 
+// ListMessagesByThread 查询指定 thread 下的历史消息（按创建时间升序）
+func (s *FeishuService) ListMessagesByThread(threadID string) ([]*larkim.Message, error) {
+	req := larkim.NewListMessageReqBuilder().
+		ContainerIdType("thread").
+		ContainerId(threadID).
+		SortType("ByCreateTimeAsc").
+		PageSize(50).
+		Build()
+
+	resp, err := s.client.Im.V1.Message.List(s.ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("list thread messages: %w", err)
+	}
+	if !resp.Success() {
+		return nil, fmt.Errorf("list thread messages failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	if resp.Data == nil || len(resp.Data.Items) == 0 {
+		return []*larkim.Message{}, nil
+	}
+
+	return resp.Data.Items, nil
+}
+
 // SendMessage sends a message to a user
 func (s *FeishuService) SendMessage(openID string, content string) error {
 	s.log.Debug("Will send message: %s to %s", content, openID)

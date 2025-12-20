@@ -32,7 +32,7 @@ func NewOpenAIService(cfg *config.AIConfig) domain.AIService {
 }
 
 // Execute processes user input via AI function calling
-func (s *OpenAIService) Execute(input string, userName string, billService domain.BillServiceInterface, renameService domain.RenameServiceInterface) (string, error) {
+func (s *OpenAIService) Execute(input string, userName string, billService domain.BillServiceInterface, renameService domain.RenameServiceInterface, history []domain.AIMessage) (string, error) {
 	functions := []domain.AIFunction{
 		{
 			Name:        "record_transaction",
@@ -93,19 +93,24 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 			" Always decide expense vs income based on description context.", userName)
 	}
 
-	systemPrompt += " Always decide expense vs income based on description context."+
-		" '叫我XXX' or '我是XXX' means rename to XXX or extract name from user's introduction."+
+	systemPrompt += " Always decide expense vs income based on description context." +
+		" '叫我XXX' or '我是XXX' means rename to XXX or extract name from user's introduction." +
 		" Respond in Chinese."
 
 	messages := []domain.AIMessage{
 		{
-			Role:      "system",
-			Content:   systemPrompt,
+			Role:    "system",
+			Content: systemPrompt,
 		},
-		{
+	}
+
+	if len(history) > 0 {
+		messages = append(messages, history...)
+	} else {
+		messages = append(messages, domain.AIMessage{
 			Role:    "user",
 			Content: input,
-		},
+		})
 	}
 
 	req := domain.AIRequest{
@@ -217,15 +222,13 @@ func (s *BillService) CreateBill(description string, amount float64, billType do
 
 // RenameService handles rename
 type RenameService struct {
-	platformID   string
-	userNameGet  func() (string, error)
-	userNameSet  func(string) error
+	userNameGet func() (string, error)
+	userNameSet func(string) error
 }
 
 // NewRenameService creates rename service
-func NewRenameService(platformID string, setName func(string) error) domain.RenameServiceInterface {
+func NewRenameService(setName func(string) error) domain.RenameServiceInterface {
 	return &RenameService{
-		platformID: platformID,
 		userNameSet: setName,
 	}
 }
@@ -292,4 +295,3 @@ func getFloat64(m map[string]interface{}, key string) float64 {
 		return 0
 	}
 }
-

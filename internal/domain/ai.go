@@ -85,7 +85,7 @@ const (
 // AIService interface for AI integration
 type AIService interface {
 	// Execute processes user input via AI function calling
-	Execute(input string, userName string, billService BillServiceInterface, renameService RenameServiceInterface) (string, error)
+	Execute(input string, userName string, billService BillServiceInterface, renameService RenameServiceInterface, history []AIMessage) (string, error)
 }
 
 // BillServiceInterface defines functionality for handling bills in AI context
