@@ -21,14 +21,15 @@ type OpenAIService struct {
 
 // NewOpenAIService creates a new OpenAI service
 func NewOpenAIService(cfg *config.AIConfig) domain.AIService {
-	// 使用 go-openai 官方/社区 SDK，优先支持自定义 BaseURL
+	// 使用 go-openai Config，以便支持自定义 BaseURL
 	openaiCfg := openai.DefaultConfig(cfg.APIKey)
 	if cfg.BaseURL != "" {
-		// go-openai 期望的是包含 /v1 的完整前缀
 		baseURL := cfg.BaseURL
+		// 去掉末尾的斜杠，避免重复 //
 		if baseURL[len(baseURL)-1] == '/' {
 			baseURL = baseURL[:len(baseURL)-1]
 		}
+		// go-openai 期望的是包含 /v1 的完整前缀
 		openaiCfg.BaseURL = fmt.Sprintf("%s/v1", baseURL)
 	}
 
@@ -39,160 +40,171 @@ func NewOpenAIService(cfg *config.AIConfig) domain.AIService {
 	}
 }
 
-// Execute processes user input via AI function calling
+// Execute processes user input via AI tool-calling using go-openai Tools API
 func (s *OpenAIService) Execute(input string, userName string, billService domain.BillServiceInterface, renameService domain.RenameServiceInterface, history []domain.AIMessage) (string, error) {
-	functions := []domain.AIFunction{
-		{
-			Name:        "record_transaction",
-			Description: "Record a financial transaction - expense or income",
-			Parameters: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"description": map[string]string{
-						"type":        "string",
-						"description": "Description of the transaction",
-					},
-					"amount": map[string]interface{}{
-						"type":        "number",
-						"description": "Amount of money (must be > 0)",
-					},
-					"type": map[string]interface{}{
-						"type":        "string",
-						"enum":        []string{"expense", "income"},
-						"description": "Type of transaction",
-					},
-					"category": map[string]string{
-						"type":        "string",
-						"description": "Category like food, transport, income",
-					},
-					"date": map[string]string{
-						"type":        "string",
-						"format":      "date",
-						"description": "Date (YYYY-MM-DD), today if not specified",
-					},
-				},
-				"required": []string{"description", "amount", "type", "category"},
-			},
-		},
-		{
-			Name:        "rename_user",
-			Description: "Update user name based on their request",
-			Parameters: map[string]interface{}{
-				"type": "object",
-				"properties": map[string]interface{}{
-					"name": map[string]string{
-						"type":        "string",
-						"description": "New name for the user",
-					},
-				},
-			},
-		},
-	}
-
-	// Handle special case for unknown user
+	// 1. System prompt
 	systemPrompt := "You are a personal finance bot."
 	if userName == "" {
-		// 未知用户名时：只能识别改名意图，其它内容统一要求用户先提供称呼
 		systemPrompt += " The user has not provided their name yet." +
 			" If they introduce themselves as '我是XXX' or '叫我XXX' or similar, you MUST extract the name and call rename_user function." +
 			" For any other request (including recording transactions, statistics, or normal chat), you MUST politely ask the user to first tell you how to address them, and DO NOT perform any other operation until a name is set."
 	} else {
 		systemPrompt += fmt.Sprintf(" Current user: %s.", userName)
 	}
-
 	systemPrompt += " Always decide expense vs income based on description context when recording transactions." +
 		" '叫我XXX' or '我是XXX' means rename to XXX or extract name from the user's introduction." +
 		" Respond in Chinese."
 
-	messages := []domain.AIMessage{
+	// 2. Build messages (system + history or current input)
+	msgs := []openai.ChatCompletionMessage{
 		{
-			Role:    "system",
+			Role:    openai.ChatMessageRoleSystem,
 			Content: systemPrompt,
 		},
 	}
 
 	if len(history) > 0 {
-		messages = append(messages, history...)
+		for _, m := range history {
+			role := openai.ChatMessageRoleUser
+			if m.Role == "system" {
+				role = openai.ChatMessageRoleSystem
+			} else if m.Role == "assistant" {
+				role = openai.ChatMessageRoleAssistant
+			}
+			msgs = append(msgs, openai.ChatCompletionMessage{
+				Role:    role,
+				Content: m.Content,
+			})
+		}
 	} else {
-		messages = append(messages, domain.AIMessage{
-			Role:    "user",
+		msgs = append(msgs, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleUser,
 			Content: input,
 		})
 	}
 
-	// 构造 ChatCompletion 请求
-	openaiMessages := make([]openai.ChatCompletionMessage, 0, len(messages))
-	for _, m := range messages {
-		openaiMessages = append(openaiMessages, openai.ChatCompletionMessage{
-			Role:    m.Role,
-			Content: m.Content,
-		})
+	// 3. Define tools: record_transaction & rename_user
+	tools := []openai.Tool{
+		{
+			Type: openai.ToolTypeFunction,
+			Function: &openai.FunctionDefinition{
+				Name:        "record_transaction",
+				Description: "Record a financial transaction - expense or income",
+				Parameters: mustMarshalJSON(map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"description": map[string]string{
+							"type":        "string",
+							"description": "Description of the transaction",
+						},
+						"amount": map[string]interface{}{
+							"type":        "number",
+							"description": "Amount of money (must be > 0)",
+						},
+						"type": map[string]interface{}{
+							"type":        "string",
+							"enum":        []string{"expense", "income"},
+							"description": "Type of transaction",
+						},
+						"category": map[string]string{
+							"type":        "string",
+							"description": "Category like food, transport, income",
+						},
+						"date": map[string]string{
+							"type":        "string",
+							"format":      "date",
+							"description": "Date (YYYY-MM-DD), today if not specified",
+						},
+					},
+					"required": []string{"description", "amount", "type", "category"},
+				}),
+			},
+		},
+		{
+			Type: openai.ToolTypeFunction,
+			Function: &openai.FunctionDefinition{
+				Name:        "rename_user",
+				Description: "Update user name based on their request",
+				Parameters: mustMarshalJSON(map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"name": map[string]string{
+							"type":        "string",
+							"description": "New name for the user",
+						},
+					},
+					"required": []string{"name"},
+				}),
+			},
+		},
 	}
 
-	openaiFunctions := make([]openai.FunctionDefinition, 0, len(functions))
-	for _, f := range functions {
-		paramsJSON, err := json.Marshal(f.Parameters)
-		if err != nil {
-			s.log.Error("marshal function params: %v", err)
-			continue
-		}
-		openaiFunctions = append(openaiFunctions, openai.FunctionDefinition{
-			Name:        f.Name,
-			Description: f.Description,
-			Parameters:  paramsJSON,
-		})
-	}
-
+	// 4. Build request
 	req := openai.ChatCompletionRequest{
-		Model:        s.config.Model,
-		Messages:     openaiMessages,
-		Functions:    openaiFunctions,
-		FunctionCall: "auto",
+		Model:    s.config.Model,
+		Messages: msgs,
+		Tools:    tools,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	// 5. Call CreateChatCompletion
 	resp, err := s.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		s.log.Error("ai call: %v", err)
 		return "抱歉，无法理解您的请求", err
 	}
-
 	if len(resp.Choices) == 0 {
-		return "抱歉，没有获得有效的AI响应", fmt.Errorf("empty choices from OpenAI")
+		return "抱歉，没有获得有效的AI响应", fmt.Errorf("empty choices")
 	}
 
 	choice := resp.Choices[0]
+	msg := choice.Message
 
-	// Direct response
-	if choice.Message.FunctionCall == nil {
-		return choice.Message.Content, nil
+	// 6. No tool call: return assistant reply directly
+	if len(msg.ToolCalls) == 0 {
+		return msg.Content, nil
 	}
 
-	// Function call
-	funcName := choice.Message.FunctionCall.Name
-	var args map[string]interface{}
-	if err := json.Unmarshal([]byte(choice.Message.FunctionCall.Arguments), &args); err != nil {
-		s.log.Error("parse args: %v", err)
-		return "抱歉，参数解析失败", err
+	// 7. Handle tool calls locally (record_transaction / rename_user)
+	for _, tc := range msg.ToolCalls {
+		fn := tc.Function
+		if fn.Name == "" {
+			continue
+		}
+
+		name := fn.Name
+		var args map[string]interface{}
+		if err := json.Unmarshal([]byte(fn.Arguments), &args); err != nil {
+			s.log.Error("parse tool args: %v", err)
+			return "抱歉，参数解析失败", err
+		}
+
+		// 未知用户时，只允许 rename_user
+		if userName == "" && name != "rename_user" {
+			s.log.Debug("block tool %s for unknown user, ask for name first", name)
+			return "我还不知道您是谁？请告诉我您的称呼。\n您可以直接说：我是张三", nil
+		}
+
+		switch name {
+		case "record_transaction":
+			return s.handleRecordTransaction(args, billService.(*BillService))
+		case "rename_user":
+			return s.handleRenameUser(args, renameService.(*RenameService))
+		}
 	}
 
-	// 如果尚未识别出用户名，但 AI 试图调用的并不是改名函数，则拦截并提示用户先提供称呼
-	if userName == "" && funcName != "rename_user" {
-		s.log.Debug("block function %s for unknown user, ask for name first", funcName)
-		return "我还不知道您是谁？请告诉我您的称呼。\n您可以直接说：我是张三", nil
-	}
+	return "未知操作", fmt.Errorf("unknown tool call")
+}
 
-	// Execute
-	switch funcName {
-	case "record_transaction":
-		return s.handleRecordTransaction(args, billService.(*BillService))
-	case "rename_user":
-		return s.handleRenameUser(args, renameService.(*RenameService))
+// mustMarshalJSON is a small helper to build json.RawMessage
+func mustMarshalJSON(v interface{}) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
 	}
-
-	return "未知操作", fmt.Errorf("unknown function: %s", funcName)
+	return b
 }
 
 func (s *OpenAIService) handleRecordTransaction(args map[string]interface{}, svc *BillService) (string, error) {
