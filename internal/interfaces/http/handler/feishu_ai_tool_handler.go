@@ -109,11 +109,15 @@ func (h *FeishuHandlerAITools) Webhook(w http.ResponseWriter, r *http.Request) {
 func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string) {
 	h.logger.Info("Processing from %s: %s", openID, text)
 
-	userName, err := h.ensureUser(openID)
+	userName, err := h.ensureUser(openID, messageID)
 	if err != nil {
-		// We don't have messageID here, so we can't use ReplyMessage
-		// This is a limitation of the current error handling flow
-		h.logger.Error("Failed to ensure user: %v", err)
+		if err.Error() == "unknown user" {
+			// User needs to provide name, send to AI with empty name
+			h.processWithoutUsername(openID, text, messageID)
+			return
+		}
+		// Other errors, show generic message
+		_ = h.feishuService.ReplyMessage(messageID, "系统错误，请稍后再试", uuid.New().String())
 		return
 	}
 
@@ -128,7 +132,8 @@ func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string) {
 	if err != nil {
 		h.logger.Error("AI execution: %v", err)
 		// Use ReplyMessage with UUID for error response
-		_ = h.feishuService.ReplyMessage(messageID, "处理失败，请重试", uuid.New().String())
+		errMsg := fmt.Sprintf("AI处理失败：%v", err)
+		_ = h.feishuService.ReplyMessage(messageID, errMsg, uuid.New().String())
 		return
 	}
 
@@ -136,25 +141,17 @@ func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string) {
 	_ = h.feishuService.ReplyMessage(messageID, response, uuid.New().String())
 }
 
-func (h *FeishuHandlerAITools) ensureUser(openID string) (string, error) {
+func (h *FeishuHandlerAITools) ensureUser(openID, messageID string) (string, error) {
 	// Try to get user name from mapping
 	userName, err := h.userMappingRepo.GetUserName(openID)
 	if err == nil {
 		return userName, nil
 	}
 
-	// If not found, get from Feishu and create mapping
-	userName, err = h.feishuService.GetUserName(openID)
-	if err != nil {
-		return "", fmt.Errorf("get user name: %w", err)
-	}
-
-	// Create new mapping
-	if err := h.userMappingRepo.SetUserName(openID, userName); err != nil {
-		return "", fmt.Errorf("create user mapping: %w", err)
-	}
-
-	return userName, nil
+	// User not found, ask them to provide their name
+	replyMsg := "我还不知道您是谁？请告诉我您的称呼。\n您可以直接说：我是张三"
+	_ = h.feishuService.ReplyMessage(messageID, replyMsg, uuid.New().String())
+	return "", fmt.Errorf("unknown user")
 }
 
 func getString(m map[string]interface{}, key string) string {
@@ -362,4 +359,27 @@ func (h *FeishuHandlerAITools) handleIMMessage(w http.ResponseWriter, payload ma
 	h.logger.Debug("=== IM message queued for processing ===")
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("success"))
+}
+
+// processWithoutUsername sends the message to AI with empty username for preliminary processing
+func (h *FeishuHandlerAITools) processWithoutUsername(openID, text, messageID string) {
+	h.logger.Info("Process without user name for openID: %s, text: %s", openID, text)
+
+	// Create rename service wrapper
+	renameFunc := func(name string) error {
+		return h.userMappingRepo.SetUserName(openID, name)
+	}
+	renameService := ai.NewRenameService(openID, renameFunc)
+
+	// Execute with empty userName, so AI will realize user needs to set name
+	response, err := h.aiservice.Execute(text, "", nil, renameService)
+	if err != nil {
+		h.logger.Error("AI execution: %v", err)
+		errMsg := fmt.Sprintf("处理失败：%v", err)
+		_ = h.feishuService.ReplyMessage(messageID, errMsg, uuid.New().String())
+		return
+	}
+
+	// Send response back to user
+	_ = h.feishuService.ReplyMessage(messageID, response, uuid.New().String())
 }

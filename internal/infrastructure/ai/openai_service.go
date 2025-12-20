@@ -81,13 +81,26 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 		},
 	}
 
+	// Handle special case for unknown user
+	systemPrompt := "You are a personal finance bot."
+	if userName == "" {
+		systemPrompt += " The user has not provided their name yet." +
+			" If they introduce themselves as '我是XXX' or '叫我XXX' or similar, extract the name and call rename_user function." +
+			" After setting the name, confirm it and proceed with normal service." +
+			" Until they provide a name, you can still help with recording transactions."
+	} else {
+		systemPrompt += fmt.Sprintf(" Current user: %s."+
+			" Always decide expense vs income based on description context.", userName)
+	}
+
+	systemPrompt += " Always decide expense vs income based on description context."+
+		" '叫我XXX' or '我是XXX' means rename to XXX or extract name from user's introduction."+
+		" Respond in Chinese."
+
 	messages := []domain.AIMessage{
 		{
-			Role: "system",
-			Content: fmt.Sprintf("You are a personal finance bot. Current user: %s."+
-				" Always decide expense vs income based on description context."+
-				" '叫我XXX' means rename to XXX."+
-				" Respond in Chinese.", userName),
+			Role:      "system",
+			Content:   systemPrompt,
 		},
 		{
 			Role:    "user",

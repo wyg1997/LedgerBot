@@ -222,50 +222,6 @@ func (s *FeishuService) AddRecordToBitable(appToken, tableToken string, fields m
 	return result.Data.Record.ID, nil
 }
 
-// GetUserName gets user name by open ID
-func (s *FeishuService) GetUserName(openID string) (string, error) {
-	token, err := s.GetAccessToken()
-	if err != nil {
-		return "", err
-	}
-
-	url := fmt.Sprintf("https://open.feishu.cn/open-apis/contact/v3/users/%s", openID)
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %v", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to get user info: %v", err)
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Code    int    `json:"code"`
-		Message string `json:"msg"`
-		Data    struct {
-			User struct {
-				Name   string `json:"name"`
-				OpenID string `json:"open_id"`
-			} `json:"user"`
-		} `json:"data"`
-	}
-
-	body, _ := io.ReadAll(resp.Body)
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("failed to parse response: %v", err)
-	}
-
-	if result.Code != 0 {
-		return "", fmt.Errorf("failed to get user info: %s", result.Message)
-	}
-
-	return result.Data.User.Name, nil
-}
 
 // MessageCallback represents callback from Feishu
 type MessageCallback struct {
@@ -286,26 +242,7 @@ type MessageCallback struct {
 
 // ProcessMessageCallback processes incoming message callback
 func (s *FeishuService) ProcessMessageCallback(callback MessageCallback) (string, error) {
-	userName, err := s.GetUserName(callback.Event.OpenID)
-	if err != nil {
-		return "", fmt.Errorf("failed to get user info: %v", err)
-	}
-
-	message := callback.Event.Text
-	if callback.Event.IsMention && callback.Event.TextWithoutAtBot != "" {
-		message = callback.Event.TextWithoutAtBot
-	}
-
-	s.log.Debug("Received message from %s: %s", userName, message)
-
-	// TODO: Process the message through bill use case
-	// This is a basic response for now
-
-	reply := fmt.Sprintf("收到您的记账信息：%s", message)
-	if err := s.SendMessage(callback.Event.OpenID, reply); err != nil {
-		s.log.Error("Failed to send reply: %v", err)
-	}
-
+	s.log.Debug("Handle Feishu callback directly in handler, skipping here")
 	return "success", nil
 }
 
