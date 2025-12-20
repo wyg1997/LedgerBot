@@ -12,16 +12,16 @@ import (
 
 // userMappingRepository implements UserMappingRepository with file-based storage
 type userMappingRepository struct {
-	file     string
+	dataDir  string
 	mu       sync.RWMutex
-	mappings map[string]*domain.UserMapping
+	mappings map[string]string // openID -> userName
 }
 
 // NewUserMappingRepository creates a new user mapping repository
-func NewUserMappingRepository(file string) (domain.UserMappingRepository, error) {
+func NewUserMappingRepository(dataDir string) (domain.UserMappingRepository, error) {
 	repo := &userMappingRepository{
-		file:     file,
-		mappings: make(map[string]*domain.UserMapping),
+		dataDir:  dataDir,
+		mappings: make(map[string]string),
 	}
 
 	// Try to load from file
@@ -35,99 +35,36 @@ func NewUserMappingRepository(file string) (domain.UserMappingRepository, error)
 	return repo, nil
 }
 
-// GetMapping gets user mapping by platform and platform ID
-func (r *userMappingRepository) GetMapping(platform domain.Platform, platformID string) (*domain.UserMapping, error) {
+// GetUserName gets user name by open ID
+func (r *userMappingRepository) GetUserName(openID string) (string, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	key := r.makeKey(platform, platformID)
-	mapping, exists := r.mappings[key]
+	name, exists := r.mappings[openID]
 	if !exists {
-		return nil, fmt.Errorf("mapping not found for platform %s and ID %s", platform, platformID)
+		return "", fmt.Errorf("user name not found for openID: %s", openID)
 	}
 
-	return mapping, nil
+	return name, nil
 }
 
-// CreateMapping creates a new user mapping
-func (r *userMappingRepository) CreateMapping(mapping *domain.UserMapping) error {
+// SetUserName sets user name for open ID
+func (r *userMappingRepository) SetUserName(openID, userName string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	key := r.makeKey(mapping.Platform, mapping.PlatformID)
-
-	// Check if already exists
-	if _, exists := r.mappings[key]; exists {
-		return fmt.Errorf("mapping already exists for platform %s and ID %s", mapping.Platform, mapping.PlatformID)
-	}
-
-	// Add to map
-	r.mappings[key] = mapping
+	// Update mapping
+	r.mappings[openID] = userName
 
 	// Save to file
 	return r.save()
-}
-
-// UpdateMapping updates user mapping
-func (r *userMappingRepository) UpdateMapping(mapping *domain.UserMapping) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	key := r.makeKey(mapping.Platform, mapping.PlatformID)
-
-	// Check if exists
-	if _, exists := r.mappings[key]; !exists {
-		return fmt.Errorf("mapping not found for platform %s and ID %s", mapping.Platform, mapping.PlatformID)
-	}
-
-	// Update in map
-	r.mappings[key] = mapping
-
-	// Save to file
-	return r.save()
-}
-
-// DeleteMapping deletes user mapping
-func (r *userMappingRepository) DeleteMapping(platform domain.Platform, platformID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	key := r.makeKey(platform, platformID)
-
-	if _, exists := r.mappings[key]; !exists {
-		return fmt.Errorf("mapping not found for platform %s and ID %s", platform, platformID)
-	}
-
-	delete(r.mappings, key)
-
-	return r.save()
-}
-
-// ListMappings lists all mappings
-func (r *userMappingRepository) ListMappings() ([]*domain.UserMapping, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	result := make([]*domain.UserMapping, 0, len(r.mappings))
-	for _, mapping := range r.mappings {
-		result = append(result, mapping)
-	}
-
-	return result, nil
-}
-
-// makeKey creates a key for the mapping
-func (r *userMappingRepository) makeKey(platform domain.Platform, platformID string) string {
-	return string(platform) + ":" + platformID
 }
 
 // load loads mappings from file
 func (r *userMappingRepository) load() error {
-	if r.file == "" {
-		return nil
-	}
+	filePath := filepath.Join(r.dataDir, "user_mapping.json")
 
-	data, err := os.ReadFile(r.file)
+	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
 	}
@@ -136,42 +73,22 @@ func (r *userMappingRepository) load() error {
 		return nil
 	}
 
-	var mappings []*domain.UserMapping
-	if err := json.Unmarshal(data, &mappings); err != nil {
-		return fmt.Errorf("failed to unmarshal mappings: %v", err)
-	}
-
-	// Convert to map
-	for _, mapping := range mappings {
-		key := r.makeKey(mapping.Platform, mapping.PlatformID)
-		r.mappings[key] = mapping
-	}
-
-	return nil
+	return json.Unmarshal(data, &r.mappings)
 }
 
 // save saves mappings to file
 func (r *userMappingRepository) save() error {
-	if r.file == "" {
-		return nil
-	}
+	filePath := filepath.Join(r.dataDir, "user_mapping.json")
 
 	// Create directory if needed
-	dir := filepath.Dir(r.file)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(r.dataDir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %v", err)
 	}
 
-	// Convert map to slice
-	mappings := make([]*domain.UserMapping, 0, len(r.mappings))
-	for _, mapping := range r.mappings {
-		mappings = append(mappings, mapping)
-	}
-
-	data, err := json.MarshalIndent(mappings, "", "  ")
+	data, err := json.MarshalIndent(r.mappings, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal mappings: %v", err)
 	}
 
-	return os.WriteFile(r.file, data, 0644)
+	return os.WriteFile(filePath, data, 0644)
 }

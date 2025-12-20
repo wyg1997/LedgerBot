@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -38,7 +39,7 @@ func main() {
 	aiService := ai.NewOpenAIService(&cfg.AI)
 
 	// Initialize repositories
-	userMappingRepo, err := repository.NewUserMappingRepository(cfg.Storage.UserMappingFile)
+	userMappingRepo, err := repository.NewUserMappingRepository(cfg.Storage.DataDir)
 	if err != nil {
 		log.Fatal("Failed to create user mapping repository: %v", err)
 	}
@@ -49,11 +50,11 @@ func main() {
 	}
 
 	// Initialize cache
-	mappingCache := cache.NewUserMappingCache(cfg.Storage.UserMappingFile)
+	mappingCache := cache.NewUserMappingCache(filepath.Join(cfg.Storage.DataDir, "user_mapping_cache"))
 	_ = mappingCache // Will be used for caching if needed
 
 	// Initialize use cases
-	billUseCase := usecase.NewBillUseCase(billRepo, nil, userMappingRepo)
+	billUseCase := usecase.NewBillUseCase(billRepo, userMappingRepo)
 
 	// Initialize handlers
 	feishuHandler := handler.NewFeishuHandlerAITools(&cfg.Feishu, feishuService, billUseCase, aiService, userMappingRepo)

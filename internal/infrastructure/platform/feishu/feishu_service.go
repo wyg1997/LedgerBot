@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/wyg1997/LedgerBot/config"
-	"github.com/wyg1997/LedgerBot/internal/domain"
 	"github.com/wyg1997/LedgerBot/pkg/logger"
 )
 
@@ -223,25 +222,25 @@ func (s *FeishuService) AddRecordToBitable(appToken, tableToken string, fields m
 	return result.Data.Record.ID, nil
 }
 
-// GetUserInfo gets user info by open ID
-func (s *FeishuService) GetUserInfo(openID string) (*domain.User, error) {
+// GetUserName gets user name by open ID
+func (s *FeishuService) GetUserName(openID string) (string, error) {
 	token, err := s.GetAccessToken()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
 	url := fmt.Sprintf("https://open.feishu.cn/open-apis/contact/v3/users/%s", openID)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %v", err)
+		return "", fmt.Errorf("failed to create request: %v", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get user info: %v", err)
+		return "", fmt.Errorf("failed to get user info: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -258,19 +257,14 @@ func (s *FeishuService) GetUserInfo(openID string) (*domain.User, error) {
 
 	body, _ := io.ReadAll(resp.Body)
 	if err := json.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse response: %v", err)
+		return "", fmt.Errorf("failed to parse response: %v", err)
 	}
 
 	if result.Code != 0 {
-		return nil, fmt.Errorf("failed to get user info: %s", result.Message)
+		return "", fmt.Errorf("failed to get user info: %s", result.Message)
 	}
 
-	return &domain.User{
-		ID:         "feishu_" + result.Data.User.OpenID,
-		Name:       result.Data.User.Name,
-		PlatformID: result.Data.User.OpenID,
-		Platform:   domain.PlatformFeishu,
-	}, nil
+	return result.Data.User.Name, nil
 }
 
 // MessageCallback represents callback from Feishu
@@ -292,7 +286,7 @@ type MessageCallback struct {
 
 // ProcessMessageCallback processes incoming message callback
 func (s *FeishuService) ProcessMessageCallback(callback MessageCallback) (string, error) {
-	userInfo, err := s.GetUserInfo(callback.Event.OpenID)
+	userName, err := s.GetUserName(callback.Event.OpenID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get user info: %v", err)
 	}
@@ -302,7 +296,7 @@ func (s *FeishuService) ProcessMessageCallback(callback MessageCallback) (string
 		message = callback.Event.TextWithoutAtBot
 	}
 
-	s.log.Debug("Received message from %s: %s", userInfo.Name, message)
+	s.log.Debug("Received message from %s: %s", userName, message)
 
 	// TODO: Process the message through bill use case
 	// This is a basic response for now

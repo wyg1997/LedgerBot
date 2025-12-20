@@ -12,7 +12,6 @@ import (
 // BillUseCaseImpl implements BillUseCase
 type BillUseCaseImpl struct {
 	billRepo       domain.BillRepository
-	userRepo       domain.UserRepository
 	userMappingRepo domain.UserMappingRepository
 	logger         logger.Logger
 }
@@ -20,12 +19,10 @@ type BillUseCaseImpl struct {
 // NewBillUseCase creates a new bill use case
 func NewBillUseCase(
 	billRepo domain.BillRepository,
-	userRepo domain.UserRepository,
 	userMappingRepo domain.UserMappingRepository,
 ) domain.BillUseCase {
 	return &BillUseCaseImpl{
 		billRepo:        billRepo,
-		userRepo:        userRepo,
 		userMappingRepo: userMappingRepo,
 		logger:          logger.GetLogger(),
 	}

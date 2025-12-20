@@ -44,15 +44,15 @@ func NewFeishuHandlerAITools(
 }
 
 // ExecuteFunc creates the service wrappers for AI execution
-func (h *FeishuHandlerAITools) ExecuteFunc(openID string, mapping *domain.UserMapping) func(string, string, domain.BillUseCase, func(string) error) (string, error) {
-	return func(input string, userName string, billUseCase domain.BillUseCase, renameFunc func(string) error) (string, error) {
-		// Create bill service wrapper
-		billService := ai.NewBillService(billUseCase, mapping.UserID, userName)
+func (h *FeishuHandlerAITools) ExecuteFunc(openID string, userName string, renameFunc func(string) error) func(string, string, domain.BillUseCase, func(string) error) (string, error) {
+	return func(input string, name string, billUseCase domain.BillUseCase, renameFunc func(string) error) (string, error) {
+		// Create bill service wrapper - use a default user ID since we don't track users anymore
+		billService := ai.NewBillService(billUseCase, openID, name)
 		// Create rename service wrapper
 		renameService := ai.NewRenameService(openID, renameFunc)
 
 		// Call the proper Execute method
-		return h.aiservice.Execute(input, userName, billService, renameService)
+		return h.aiservice.Execute(input, name, billService, renameService)
 	}
 }
 
@@ -109,7 +109,7 @@ func (h *FeishuHandlerAITools) Webhook(w http.ResponseWriter, r *http.Request) {
 func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string) {
 	h.logger.Info("Processing from %s: %s", openID, text)
 
-	mapping, err := h.ensureUser(openID)
+	userName, err := h.ensureUser(openID)
 	if err != nil {
 		// We don't have messageID here, so we can't use ReplyMessage
 		// This is a limitation of the current error handling flow
@@ -117,15 +117,14 @@ func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string) {
 		return
 	}
 
-	// Rename function
+	// Rename function - simplifies to just updating stored name
 	renameFunc := func(name string) error {
-		mapping.UserName = name
-		return h.userMappingRepo.UpdateMapping(mapping)
+		return h.userMappingRepo.SetUserName(openID, name)
 	}
 
 	// Execute via tool service
-	toolService := h.ExecuteFunc(openID, mapping)
-	response, err := toolService(text, mapping.UserName, h.billUseCase, renameFunc)
+	toolService := h.ExecuteFunc(openID, userName, renameFunc)
+	response, err := toolService(text, userName, h.billUseCase, renameFunc)
 	if err != nil {
 		h.logger.Error("AI execution: %v", err)
 		// Use ReplyMessage with UUID for error response
@@ -137,26 +136,25 @@ func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string) {
 	_ = h.feishuService.ReplyMessage(messageID, response, uuid.New().String())
 }
 
-func (h *FeishuHandlerAITools) ensureUser(openID string) (*domain.UserMapping, error) {
-	mapping, err := h.userMappingRepo.GetMapping(domain.PlatformFeishu, openID)
+func (h *FeishuHandlerAITools) ensureUser(openID string) (string, error) {
+	// Try to get user name from mapping
+	userName, err := h.userMappingRepo.GetUserName(openID)
 	if err == nil {
-		return mapping, nil
+		return userName, nil
 	}
 
-	info, err := h.feishuService.GetUserInfo(openID)
+	// If not found, get from Feishu and create mapping
+	userName, err = h.feishuService.GetUserName(openID)
 	if err != nil {
-		// If we can't get user info, use ReplyMessage to notify
-		return nil, fmt.Errorf("get user info: %w", err)
+		return "", fmt.Errorf("get user name: %w", err)
 	}
 
-	mapping = &domain.UserMapping{
-		Platform:   domain.PlatformFeishu,
-		PlatformID: openID,
-		UserID:     info.ID,
-		UserName:   info.Name,
+	// Create new mapping
+	if err := h.userMappingRepo.SetUserName(openID, userName); err != nil {
+		return "", fmt.Errorf("create user mapping: %w", err)
 	}
 
-	return mapping, h.userMappingRepo.CreateMapping(mapping)
+	return userName, nil
 }
 
 func getString(m map[string]interface{}, key string) string {

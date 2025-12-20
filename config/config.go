@@ -54,9 +54,8 @@ type AIConfig struct {
 }
 
 type StorageConfig struct {
-	UserMappingFile string // 用户映射文件路径
-	DataDir         string // 数据存储目录
-	LogLevel        string // 日志级别
+	DataDir  string // 数据存储目录
+	LogLevel string // 日志级别
 }
 
 type CacheConfig struct {
@@ -99,9 +98,8 @@ func LoadConfig() *Config {
 			Model:   getEnv("AI_MODEL", "gpt-3.5-turbo"),
 		},
 		Storage: StorageConfig{
-			UserMappingFile: getEnv("USER_MAPPING_FILE", "./data/user_mapping.json"),
-			DataDir:         getEnv("DATA_DIR", "./data"),
-			LogLevel:        getEnv("LOG_LEVEL", "info"),
+			DataDir:  getEnv("DATA_DIR", "./data"),
+			LogLevel: getEnv("LOG_LEVEL", "info"),
 		},
 		Cache: CacheConfig{
 			TTL:          getEnvAsInt("CACHE_TTL", 3600),    // 1 hour
