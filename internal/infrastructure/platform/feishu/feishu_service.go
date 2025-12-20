@@ -56,8 +56,9 @@ func (s *FeishuService) ReplyMessage(messageID string, content string, uuid stri
 
 	// Check response code
 	if !resp.Success() {
+        s.log.Error("Replay error: %s, code: %s", resp.Code, resp.Msg)
 		return fmt.Errorf("failed to reply message: code=%d, msg=%s", resp.Code, resp.Msg)
-	}
+    }
 
 	s.log.Debug("Successfully replied to message %s", messageID)
 	return nil
