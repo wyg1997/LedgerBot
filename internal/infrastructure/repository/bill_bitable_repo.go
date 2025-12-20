@@ -152,8 +152,8 @@ func (r *bitableBillRepository) CreateBill(bill *domain.Bill) error {
 	fields := map[string]interface{}{
 		r.config.FieldDescription: bill.Description,
 		r.config.FieldAmount:      bill.Amount,
-		r.config.FieldType:        billType,
-		r.config.FieldCategory:    bill.Category,
+		r.config.FieldType:        bill.Category,
+		r.config.FieldCategory:    billType,
 		r.config.FieldDate:        dateTimestamp,
 		r.config.FieldUserName:    bill.UserName,
 	}
@@ -244,7 +244,7 @@ func (r *bitableBillRepository) ListBills(username string, startDate, endDate *t
 			typeStr = "收入"
 		}
 		filterConditions = append(filterConditions, map[string]interface{}{
-			"field_name": r.config.FieldType,
+			"field_name": r.config.FieldCategory,
 			"operator":   "is",
 			"value":      []string{typeStr},
 		})
@@ -252,7 +252,7 @@ func (r *bitableBillRepository) ListBills(username string, startDate, endDate *t
 
 	if category != nil && *category != "" {
 		filterConditions = append(filterConditions, map[string]interface{}{
-			"field_name": r.config.FieldCategory,
+			"field_name": r.config.FieldType,
 			"operator":   "is",
 			"value":      []string{*category},
 		})
@@ -383,7 +383,7 @@ func (r *bitableBillRepository) convertRecordToBill(record map[string]interface{
 		ID:          recordID,
 		Description: getStringField(fields, r.config.FieldDescription),
 		Amount:      getNumberField(fields, r.config.FieldAmount),
-		Category:    getStringField(fields, r.config.FieldCategory),
+		Category:    getStringField(fields, r.config.FieldType),
 		UserName:    getStringField(fields, r.config.FieldUserName),
 		OriginalMsg: getStringField(fields, r.config.FieldOriginalMsg),
 	}
@@ -406,8 +406,8 @@ func (r *bitableBillRepository) convertRecordToBill(record map[string]interface{
 		}
 	}
 
-	// Parse bill type from Chinese
-	if typeStr := getStringField(fields, r.config.FieldType); typeStr != "" {
+	// Parse bill type from Chinese (收支类型存储在 FieldCategory)
+	if typeStr := getStringField(fields, r.config.FieldCategory); typeStr != "" {
 		if typeStr == "收入" {
 			bill.Type = domain.BillTypeIncome
 		} else {

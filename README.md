@@ -49,7 +49,7 @@ cp .env.example .env
    - 格式：YYYY-MM-DD HH:MM:SS（如：2024-12-17 14:30:25）
    - 精确到秒，记录账单创建的时间
 
-6. **用户** (默认字段名：用户) - 单行文本
+6. **记录者** (默认字段名：记录者) - 单行文本
    - 存储用户的显示名称
 
 7. **原始消息** (默认字段名：原始消息) - 单行文本
@@ -80,6 +80,7 @@ go run main.go
 # 飞书应用
 FEISHU_APP_ID=你的app_id
 FEISHU_APP_SECRET=你的app_secret
+FEISHU_BOT_NAME=记账管家  # Bot名称，用于识别@提及（可选，默认为"记账管家"）
 
 # 只需复制完整的飞书多维表格URL！
 FEISHU_BITABLE_URL=https://example.feishu.cn/base/YOUR_APP_TOKEN?table=YOUR_TABLE_TOKEN
@@ -111,7 +112,7 @@ AI_API_KEY=你的openai_api_key
   - 类型：支出
   - 分类：餐饮（AI推荐）
   - 日期：2024-12-17 14:30:25
-  - 用户：张三
+  - 记录者：张三
   - 原始消息：午饭30元
 
 ### 用户重命名
@@ -136,7 +137,7 @@ FEISHU_FIELD_AMOUNT=金额
 FEISHU_FIELD_TYPE=类型
 FEISHU_FIELD_CATEGORY=分类
 FEISHU_FIELD_DATE=日期
-FEISHU_FIELD_USER_NAME=用户
+FEISHU_FIELD_USER_NAME=记录者
 FEISHU_FIELD_ORIGINAL_MSG=原始消息
 ```
 
@@ -146,6 +147,7 @@ FEISHU_FIELD_ORIGINAL_MSG=原始消息
 |--------|------|----------|
 | FEISHU_APP_ID | 飞书应用ID | 必填 |
 | FEISHU_APP_SECRET | 飞书应用密钥 | 必填 |
+| FEISHU_BOT_NAME | Bot名称，用于识别@提及 | 记账管家 |
 | FEISHU_BITABLE_URL | 飞书多维表格完整URL | 必填 |
 | AI_API_KEY | OpenAI API密钥 | 必填 |
 | SERVER_PORT | 服务端口号 | 8080 |

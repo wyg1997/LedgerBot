@@ -86,10 +86,10 @@ func LoadConfig() *Config {
 			BotName:          getEnv("FEISHU_BOT_NAME", "记账管家"),
 			FieldDescription: getEnv("FEISHU_FIELD_DESCRIPTION", "描述"),
 			FieldAmount:      getEnv("FEISHU_FIELD_AMOUNT", "金额"),
-			FieldType:        getEnv("FEISHU_FIELD_TYPE", "类型"),
-			FieldCategory:    getEnv("FEISHU_FIELD_CATEGORY", "分类"),
+			FieldType:        getEnv("FEISHU_FIELD_TYPE", "分类"),
+			FieldCategory:    getEnv("FEISHU_FIELD_CATEGORY", "收支类型"),
 			FieldDate:        getEnv("FEISHU_FIELD_DATE", "日期"),
-			FieldUserName:    getEnv("FEISHU_FIELD_USER_NAME", "用户"),
+			FieldUserName:    getEnv("FEISHU_FIELD_USER_NAME", "记录者"),
 			FieldOriginalMsg: getEnv("FEISHU_FIELD_ORIGINAL_MSG", "原始消息"),
 		},
 		AI: AIConfig{
