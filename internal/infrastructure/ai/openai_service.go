@@ -52,6 +52,7 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 		systemPrompt += fmt.Sprintf(" Current user: %s.", userName)
 	}
 	systemPrompt += " Always decide expense vs income based on description context when recording transactions." +
+		" When recording transactions, the date is automatically set to the current date by the server, so you should NOT ask for or use date information from the user." +
 		" '叫我XXX' or '我是XXX' means rename to XXX or extract name from the user's introduction." +
 		" Respond in Chinese."
 
@@ -109,11 +110,6 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 						"category": map[string]string{
 							"type":        "string",
 							"description": "Category like food, transport, income",
-						},
-						"date": map[string]string{
-							"type":        "string",
-							"format":      "date",
-							"description": "Date (YYYY-MM-DD), today if not specified",
 						},
 					},
 					"required": []string{"description", "amount", "type", "category"},
@@ -217,19 +213,13 @@ func (s *OpenAIService) handleRecordTransaction(args map[string]interface{}, svc
 		return "请提供有效的交易信息", fmt.Errorf("invalid args")
 	}
 
-	var billDate *time.Time
-	if ds := getString(args, "date"); ds != "" {
-		if t, err := time.Parse("2006-01-02", ds); err == nil {
-			billDate = &t
-		}
-	}
-
+	// 日期由服务器自动使用当前时间，不接收 AI 传入的日期参数
 	bt := domain.BillTypeExpense
 	if transType == "income" {
 		bt = domain.BillTypeIncome
 	}
 
-	bill, err := svc.CreateBill(description, amount, bt, billDate, category)
+	bill, err := svc.CreateBill(description, amount, bt, nil, category)
 	if err != nil {
 		s.log.Error("create bill: %v", err)
 		return "记账失败", err
