@@ -1,13 +1,12 @@
 package ai
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"time"
 
+	openai "github.com/sashabaranov/go-openai"
 	"github.com/wyg1997/LedgerBot/config"
 	"github.com/wyg1997/LedgerBot/internal/domain"
 	"github.com/wyg1997/LedgerBot/pkg/logger"
@@ -15,19 +14,28 @@ import (
 
 // OpenAIService implements AIService with only function calling
 type OpenAIService struct {
-	config     *config.AIConfig
-	httpClient *http.Client
-	log        logger.Logger
+	config *config.AIConfig
+	client *openai.Client
+	log    logger.Logger
 }
 
 // NewOpenAIService creates a new OpenAI service
 func NewOpenAIService(cfg *config.AIConfig) domain.AIService {
+	// 使用 go-openai 官方/社区 SDK，优先支持自定义 BaseURL
+	openaiCfg := openai.DefaultConfig(cfg.APIKey)
+	if cfg.BaseURL != "" {
+		// go-openai 期望的是包含 /v1 的完整前缀
+		baseURL := cfg.BaseURL
+		if baseURL[len(baseURL)-1] == '/' {
+			baseURL = baseURL[:len(baseURL)-1]
+		}
+		openaiCfg.BaseURL = fmt.Sprintf("%s/v1", baseURL)
+	}
+
 	return &OpenAIService{
 		config: cfg,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		log: logger.GetLogger(),
+		client: openai.NewClientWithConfig(openaiCfg),
+		log:    logger.GetLogger(),
 	}
 }
 
@@ -112,17 +120,47 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 		})
 	}
 
-	req := domain.AIRequest{
+	// 构造 ChatCompletion 请求
+	openaiMessages := make([]openai.ChatCompletionMessage, 0, len(messages))
+	for _, m := range messages {
+		openaiMessages = append(openaiMessages, openai.ChatCompletionMessage{
+			Role:    m.Role,
+			Content: m.Content,
+		})
+	}
+
+	openaiFunctions := make([]openai.FunctionDefinition, 0, len(functions))
+	for _, f := range functions {
+		paramsJSON, err := json.Marshal(f.Parameters)
+		if err != nil {
+			s.log.Error("marshal function params: %v", err)
+			continue
+		}
+		openaiFunctions = append(openaiFunctions, openai.FunctionDefinition{
+			Name:        f.Name,
+			Description: f.Description,
+			Parameters:  paramsJSON,
+		})
+	}
+
+	req := openai.ChatCompletionRequest{
 		Model:        s.config.Model,
-		Messages:     messages,
-		Functions:    functions,
+		Messages:     openaiMessages,
+		Functions:    openaiFunctions,
 		FunctionCall: "auto",
 	}
 
-	resp, err := s.callAPI(req)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	resp, err := s.client.CreateChatCompletion(ctx, req)
 	if err != nil {
 		s.log.Error("ai call: %v", err)
 		return "抱歉，无法理解您的请求", err
+	}
+
+	if len(resp.Choices) == 0 {
+		return "抱歉，没有获得有效的AI响应", fmt.Errorf("empty choices from OpenAI")
 	}
 
 	choice := resp.Choices[0]
@@ -241,41 +279,6 @@ func NewRenameService(setName func(string) error) domain.RenameServiceInterface 
 // Rename updates user name
 func (s *RenameService) Rename(name string) error {
 	return s.userNameSet(name)
-}
-
-// Remaining implementation helpers
-func (s *OpenAIService) callAPI(req domain.AIRequest) (*domain.AIResponse, error) {
-	reqBody, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("json marshal: %w", err)
-	}
-
-	httpReq, err := http.NewRequest("POST", fmt.Sprintf("%s/v1/chat/completions", s.config.BaseURL), bytes.NewBuffer(reqBody))
-	if err != nil {
-		return nil, fmt.Errorf("new request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", fmt.Sprintf("Bearer %s", s.config.APIKey))
-
-	resp, err := s.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("do request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read body: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("api error %d: %s", resp.StatusCode, string(body))
-	}
-
-	result := &domain.AIResponse{}
-	json.Unmarshal(body, result)
-	return result, nil
 }
 
 func getString(m map[string]interface{}, key string) string {
