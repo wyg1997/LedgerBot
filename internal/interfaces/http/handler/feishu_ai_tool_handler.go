@@ -47,8 +47,8 @@ func NewFeishuHandlerAITools(
 // ExecuteFunc creates the service wrappers for AI execution
 func (h *FeishuHandlerAITools) ExecuteFunc(openID string, userName string, renameFunc func(string) error) func(string, string, domain.BillUseCase, func(string) error, []domain.AIMessage) (string, error) {
 	return func(input string, name string, billUseCase domain.BillUseCase, renameFunc func(string) error, history []domain.AIMessage) (string, error) {
-		// Create bill service wrapper - use a default user ID since we don't track users anymore
-		billService := ai.NewBillService(billUseCase, openID, name)
+		// Create bill service wrapper - pass original message (input) to preserve it
+		billService := ai.NewBillService(billUseCase, openID, name, input)
 		// Create rename service wrapper
 		renameService := ai.NewRenameService(renameFunc)
 
@@ -108,6 +108,8 @@ func (h *FeishuHandlerAITools) Webhook(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string, history []domain.AIMessage) {
+	// text is the current/latest message from the webhook, which will be used as originalMsg
+	// For thread conversations, we only record the latest message as originalMsg, not the entire history
 	h.logger.Info("Processing from %s: %s", openID, text)
 
 	userName, hasName := h.getUserNameIfExists(openID)
@@ -119,6 +121,7 @@ func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string, hi
 	}
 
 	// Execute via tool service
+	// Note: text (current message) is passed as input, which will be stored as originalMsg in bill
 	toolService := h.ExecuteFunc(openID, userName, renameFunc)
 	response, err := toolService(text, userName, h.billUseCase, renameFunc, history)
 	if err != nil {
@@ -432,7 +435,9 @@ func (h *FeishuHandlerAITools) handleIMMessage(w http.ResponseWriter, payload ma
 	}
 
 	// Process the message
-	h.logger.Debug("Processing message for open_id: %s, text: '%s'", openID, text)
+	// Note: text is from the current webhook message (the latest message in thread),
+	// which will be used as originalMsg for bill recording
+	h.logger.Debug("Processing message for open_id: %s, text: '%s' (this will be recorded as originalMsg)", openID, text)
 	go h.processMessage(openID, text, messageID, historyMsgs)
 
 	h.logger.Debug("=== IM message queued for processing ===")

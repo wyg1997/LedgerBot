@@ -53,6 +53,8 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 	}
 	systemPrompt += " Always decide expense vs income based on description context when recording transactions." +
 		" When recording transactions, the date is automatically set to the current date by the server, so you should NOT ask for or use date information from the user." +
+		" When calling record_transaction, you should provide the original_message parameter with the most relevant user message from the conversation that best represents what the user said about this transaction." +
+		" For thread conversations, extract the most appropriate user message from the conversation history that led to this transaction." +
 		" '叫我XXX' or '我是XXX' means rename to XXX or extract name from the user's introduction." +
 		" Respond in Chinese."
 
@@ -110,6 +112,10 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 						"category": map[string]string{
 							"type":        "string",
 							"description": "Category like food, transport, income",
+						},
+						"original_message": map[string]string{
+							"type":        "string",
+							"description": "The original user message that led to this transaction. For thread conversations, extract the most relevant user message from the conversation history that best represents what the user said about this transaction.",
 						},
 					},
 					"required": []string{"description", "amount", "type", "category"},
@@ -208,6 +214,7 @@ func (s *OpenAIService) handleRecordTransaction(args map[string]interface{}, svc
 	amount := getFloat64(args, "amount")
 	transType := getString(args, "type")
 	category := getString(args, "category")
+	originalMsg := getString(args, "original_message")
 
 	if description == "" || amount <= 0 {
 		return "请提供有效的交易信息", fmt.Errorf("invalid args")
@@ -219,7 +226,7 @@ func (s *OpenAIService) handleRecordTransaction(args map[string]interface{}, svc
 		bt = domain.BillTypeIncome
 	}
 
-	bill, err := svc.CreateBill(description, amount, bt, nil, category)
+	bill, err := svc.CreateBill(description, amount, bt, nil, category, originalMsg)
 	if err != nil {
 		s.log.Error("create bill: %v", err)
 		return "记账失败", err
@@ -253,16 +260,26 @@ type BillService struct {
 	billUseCase domain.BillUseCase
 	userID      string
 	userName    string
+	originalMsg string
 }
 
 // NewBillService creates bill service for AI usage
-func NewBillService(billUseCase domain.BillUseCase, userID string, userName string) domain.BillServiceInterface {
-	return &BillService{billUseCase: billUseCase, userID: userID, userName: userName}
+func NewBillService(billUseCase domain.BillUseCase, userID string, userName string, originalMsg string) domain.BillServiceInterface {
+	return &BillService{
+		billUseCase: billUseCase,
+		userID:      userID,
+		userName:    userName,
+		originalMsg: originalMsg,
+	}
 }
 
 // CreateBill records new bill
-func (s *BillService) CreateBill(description string, amount float64, billType domain.BillType, date *time.Time, category string) (*domain.Bill, error) {
-	return s.billUseCase.CreateBill(s.userName, s.userID, "", description, amount, billType, date, &category)
+func (s *BillService) CreateBill(description string, amount float64, billType domain.BillType, date *time.Time, category string, originalMsg string) (*domain.Bill, error) {
+	// Use originalMsg from AI toolcall parameter, fallback to stored originalMsg if not provided
+	if originalMsg == "" {
+		originalMsg = s.originalMsg
+	}
+	return s.billUseCase.CreateBill(s.userName, s.userID, originalMsg, description, amount, billType, date, &category)
 }
 
 // RenameService handles rename

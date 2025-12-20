@@ -5,17 +5,17 @@ import (
 )
 
 type AIRequest struct {
-	Model        string      `json:"model"`
-	Messages     []AIMessage `json:"messages"`
-	MaxTokens    int         `json:"max_tokens"`
-	Temperature  float64     `json:"temperature"`
+	Model        string       `json:"model"`
+	Messages     []AIMessage  `json:"messages"`
+	MaxTokens    int          `json:"max_tokens"`
+	Temperature  float64      `json:"temperature"`
 	Functions    []AIFunction `json:"functions,omitempty"`
 	FunctionCall interface{}  `json:"function_call,omitempty"`
 }
 
 type AIMessage struct {
-	Role         string       `json:"role"`
-	Content      string       `json:"content"`
+	Role         string        `json:"role"`
+	Content      string        `json:"content"`
 	FunctionCall *FunctionCall `json:"function_call,omitempty"`
 }
 
@@ -35,9 +35,9 @@ type AIResponse struct {
 }
 
 type Choice struct {
-	Index        int          `json:"index"`
-	Message      AIMessage    `json:"message"`
-	FinishReason string       `json:"finish_reason"`
+	Index        int           `json:"index"`
+	Message      AIMessage     `json:"message"`
+	FinishReason string        `json:"finish_reason"`
 	FunctionCall *FunctionCall `json:"function_call,omitempty"`
 }
 
@@ -54,11 +54,11 @@ type Usage struct {
 
 // BillExtraction represents extracted bill information from AI
 type BillExtraction struct {
-	Description string   `json:"description"`
-	Amount      float64  `json:"amount"`
-	Type        string   `json:"type"`
-	Category    string   `json:"category"`
-	Date        string   `json:"date,omitempty"`
+	Description string  `json:"description"`
+	Amount      float64 `json:"amount"`
+	Type        string  `json:"type"`
+	Category    string  `json:"category"`
+	Date        string  `json:"date,omitempty"`
 }
 
 // RenameRequest represents a user rename request
@@ -77,7 +77,7 @@ const (
 )
 
 // AICommand represents a command determined by AI
- type AICommand struct {
+type AICommand struct {
 	FunctionName string
 	Arguments    map[string]interface{}
 }
@@ -90,7 +90,7 @@ type AIService interface {
 
 // BillServiceInterface defines functionality for handling bills in AI context
 type BillServiceInterface interface {
-	CreateBill(description string, amount float64, billType BillType, date *time.Time, category string) (*Bill, error)
+	CreateBill(description string, amount float64, billType BillType, date *time.Time, category string, originalMsg string) (*Bill, error)
 }
 
 // RenameServiceInterface defines functionality for renaming users in AI context

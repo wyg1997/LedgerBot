@@ -159,8 +159,17 @@ func (r *bitableBillRepository) CreateBill(bill *domain.Bill) error {
 	}
 
 	// Add original message if configured
-	if r.config.FieldOriginalMsg != "" && bill.OriginalMsg != "" {
-		fields[r.config.FieldOriginalMsg] = bill.OriginalMsg
+	if r.config.FieldOriginalMsg != "" {
+		if bill.OriginalMsg != "" {
+			fields[r.config.FieldOriginalMsg] = bill.OriginalMsg
+			r.logger.Debug("Added original message to fields: field=%s, value=%s", r.config.FieldOriginalMsg, bill.OriginalMsg)
+		} else {
+			r.logger.Debug("Original message field is configured but bill.OriginalMsg is empty")
+		}
+	} else {
+		if bill.OriginalMsg != "" {
+			r.logger.Debug("Original message exists but field name is not configured: OriginalMsg=%s", bill.OriginalMsg)
+		}
 	}
 
 	r.logger.Debug("Preparing to create bill in bitable: app_token=%s, table_id=%s, fields=%+v", r.appToken, r.tableID, fields)
