@@ -125,6 +125,55 @@ func (s *FeishuService) SendMessage(openID string, content string) error {
 	return nil
 }
 
+// ReplyMessage replies to a message in thread
+func (s *FeishuService) ReplyMessage(messageID string, content string, uuid string) error {
+	token, err := s.GetAccessToken()
+	if err != nil {
+		return err
+	}
+
+	url := "https://open.feishu.cn/open-apis/im/v1/messages/" + messageID + "/reply"
+
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"content": map[string]string{
+			"text": content,
+		},
+		"msg_type": "text",
+		"uuid":     uuid,
+		"reply_in_thread": true,
+	})
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(reqBody))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to reply message: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Code    int    `json:"code"`
+		Message string `json:"msg"`
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if err := json.Unmarshal(body, &result); err != nil {
+		return fmt.Errorf("failed to parse response: %v", err)
+	}
+
+	if result.Code != 0 {
+		return fmt.Errorf("failed to reply message: %s", result.Message)
+	}
+
+	return nil
+}
+
 // AddRecordToBitable adds a record to Feishu bitable
 func (s *FeishuService) AddRecordToBitable(appToken, tableToken string, fields map[string]interface{}) (string, error) {
 	token, err := s.GetAccessToken()

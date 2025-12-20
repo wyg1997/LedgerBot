@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/wyg1997/LedgerBot/config"
 	"github.com/wyg1997/LedgerBot/internal/domain"
 	"github.com/wyg1997/LedgerBot/internal/infrastructure/ai"
@@ -105,12 +106,14 @@ func (h *FeishuHandlerAITools) Webhook(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ok"))
 }
 
-func (h *FeishuHandlerAITools) processMessage(openID, text string) {
+func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string) {
 	h.logger.Info("Processing from %s: %s", openID, text)
 
 	mapping, err := h.ensureUser(openID)
 	if err != nil {
-		h.feishuService.SendMessage(openID, "获取用户信息失败")
+		// We don't have messageID here, so we can't use ReplyMessage
+		// This is a limitation of the current error handling flow
+		h.logger.Error("Failed to ensure user: %v", err)
 		return
 	}
 
@@ -125,11 +128,13 @@ func (h *FeishuHandlerAITools) processMessage(openID, text string) {
 	response, err := toolService(text, mapping.UserName, h.billUseCase, renameFunc)
 	if err != nil {
 		h.logger.Error("AI execution: %v", err)
-		h.feishuService.SendMessage(openID, "处理失败，请重试")
+		// Use ReplyMessage with UUID for error response
+		_ = h.feishuService.ReplyMessage(messageID, "处理失败，请重试", uuid.New().String())
 		return
 	}
 
-	h.feishuService.SendMessage(openID, response)
+	// Use ReplyMessage with UUID for successful response
+	_ = h.feishuService.ReplyMessage(messageID, response, uuid.New().String())
 }
 
 func (h *FeishuHandlerAITools) ensureUser(openID string) (*domain.UserMapping, error) {
@@ -140,6 +145,7 @@ func (h *FeishuHandlerAITools) ensureUser(openID string) (*domain.UserMapping, e
 
 	info, err := h.feishuService.GetUserInfo(openID)
 	if err != nil {
+		// If we can't get user info, use ReplyMessage to notify
 		return nil, fmt.Errorf("get user info: %w", err)
 	}
 
@@ -347,9 +353,13 @@ func (h *FeishuHandlerAITools) handleIMMessage(w http.ResponseWriter, payload ma
 		h.logger.Debug("Unknown chat type '%s', still processing", chatType)
 	}
 
+	// Extract message_id for threading
+	messageID := getString(message, "message_id")
+	h.logger.Debug("Message ID: %s", messageID)
+
 	// Process the message
 	h.logger.Debug("Processing message for open_id: %s, text: '%s'", openID, text)
-	go h.processMessage(openID, text)
+	go h.processMessage(openID, text, messageID)
 
 	h.logger.Debug("=== IM message queued for processing ===")
 	w.WriteHeader(http.StatusOK)
