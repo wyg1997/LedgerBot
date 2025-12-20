@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/wyg1997/LedgerBot/internal/domain"
@@ -45,6 +46,11 @@ func (r *userMappingRepository) GetUserName(openID string) (string, error) {
 		return "", fmt.Errorf("user name not found for openID: %s", openID)
 	}
 
+	// Validate that the retrieved name is not empty or whitespace-only
+	if name == "" || strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("user name is empty or invalid for openID: %s", openID)
+	}
+
 	return name, nil
 }
 
@@ -52,6 +58,11 @@ func (r *userMappingRepository) GetUserName(openID string) (string, error) {
 func (r *userMappingRepository) SetUserName(openID, userName string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// Validate user name is not empty or whitespace
+	if userName == "" || strings.TrimSpace(userName) == "" {
+		return fmt.Errorf("user name cannot be empty")
+	}
 
 	// Update mapping
 	r.mappings[openID] = userName

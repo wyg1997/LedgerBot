@@ -120,6 +120,7 @@ func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string) {
 		_ = h.feishuService.ReplyMessage(messageID, "系统错误，请稍后再试", uuid.New().String())
 		return
 	}
+    h.logger.Info("用户名: %s", userName)
 
 	// Rename function - simplifies to just updating stored name
 	renameFunc := func(name string) error {
@@ -145,6 +146,7 @@ func (h *FeishuHandlerAITools) ensureUser(openID, messageID string) (string, err
 	// Try to get user name from mapping
 	userName, err := h.userMappingRepo.GetUserName(openID)
 	if err == nil {
+        h.logger.Debug("获取用户映射: %s -> %s", openID, userName)
 		return userName, nil
 	}
 
