@@ -53,6 +53,7 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 	}
 	systemPrompt += " Always decide expense vs income based on description context when recording transactions." +
 		" When recording transactions, the date is automatically set to the current date by the server, so you should NOT ask for or use date information from the user." +
+		" When calling record_transaction, you MUST directly choose a category from the provided enum list (餐饮, 交通, 购物, 娱乐, 医疗, 教育, 住房, 水电费, 通讯, 服装, 收入, 其它) based on the transaction description. DO NOT ask the user to confirm or choose the category - just select the most appropriate one automatically. Use '其它' if none of the specific categories fit well." +
 		" When calling record_transaction, you should provide the original_message parameter with the most relevant user message from the conversation that best represents what the user said about this transaction." +
 		" For thread conversations, extract the most appropriate user message from the conversation history that led to this transaction." +
 		" '叫我XXX' or '我是XXX' means rename to XXX or extract name from the user's introduction." +
@@ -109,9 +110,10 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 							"enum":        []string{"expense", "income"},
 							"description": "Type of transaction",
 						},
-						"category": map[string]string{
+						"category": map[string]interface{}{
 							"type":        "string",
-							"description": "Category like food, transport, income",
+							"enum":        []string{"餐饮", "交通", "购物", "娱乐", "医疗", "教育", "住房", "水电费", "通讯", "服装", "收入", "其它"},
+							"description": "Transaction category. Common categories: 餐饮(food/dining), 交通(transportation), 购物(shopping), 娱乐(entertainment), 医疗(medical), 教育(education), 住房(housing), 水电费(utilities), 通讯(communication), 服装(clothing), 收入(income), 其它(other). Always choose the most appropriate category based on the transaction description, use '其它' if none of the categories fit well. Do NOT ask the user for category confirmation.",
 						},
 						"original_message": map[string]string{
 							"type":        "string",
