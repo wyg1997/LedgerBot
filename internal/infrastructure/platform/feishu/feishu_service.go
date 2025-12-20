@@ -155,6 +155,8 @@ func (s *FeishuService) ProcessMessageCallback(callback MessageCallback) (string
 
 // AddRecordToBitable 使用 Bitable SDK 创建记录
 func (s *FeishuService) AddRecordToBitable(appToken, tableID string, fields map[string]interface{}) (string, error) {
+	s.log.Debug("Creating bitable record: app_token=%s, table_id=%s, fields=%+v", appToken, tableID, fields)
+
 	req := larkbitable.NewCreateAppTableRecordReqBuilder().
 		AppToken(appToken).
 		TableId(tableID).
@@ -165,19 +167,22 @@ func (s *FeishuService) AddRecordToBitable(appToken, tableID string, fields map[
 
 	resp, err := s.client.Bitable.V1.AppTableRecord.Create(s.ctx, req)
 	if err != nil {
+		s.log.Error("Create bitable record API call failed: app_token=%s, table_id=%s, error=%v", appToken, tableID, err)
 		return "", fmt.Errorf("create bitable record failed: %w", err)
 	}
 
 	if !resp.Success() {
+		s.log.Error("Create bitable record failed: app_token=%s, table_id=%s, code=%d, msg=%s", appToken, tableID, resp.Code, resp.Msg)
 		return "", fmt.Errorf("create bitable record failed: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
 	if resp.Data == nil || resp.Data.Record == nil || resp.Data.Record.RecordId == nil {
+		s.log.Error("Create bitable record success but record_id is empty: app_token=%s, table_id=%s", appToken, tableID)
 		return "", fmt.Errorf("create bitable record success but record_id is empty")
 	}
 
 	recordID := *resp.Data.Record.RecordId
-	s.log.Debug("Created bitable record: RecordID=%s, AppToken=%s, TableID=%s", recordID, appToken, tableID)
+	s.log.Debug("Successfully created bitable record: record_id=%s, app_token=%s, table_id=%s", recordID, appToken, tableID)
 	return recordID, nil
 }
 
@@ -218,6 +223,6 @@ func (s *FeishuService) GetBitableAppTokenFromWikiNode(nodeToken string) (string
 	}
 
 	appToken := *resp.Data.Node.ObjToken
-	s.log.Debug("Resolved wiki node %s to bitable app_token %s", nodeToken, appToken)
+	s.log.Info("Resolved wiki node to bitable app_token: node_token=%s -> app_token=%s", nodeToken, appToken)
 	return appToken, nil
 }

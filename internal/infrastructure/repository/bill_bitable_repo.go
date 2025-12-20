@@ -24,8 +24,9 @@ type bitableBillRepository struct {
 
 // NewBitableBillRepository creates a new bitable bill repository
 func NewBitableBillRepository(feishuService *feishu.FeishuService, config *config.FeishuConfig) (domain.BillRepository, error) {
+	log := logger.GetLogger()
 	// Parse the bitable URL to extract node/app token and table id
-	rawToken, tableID, isWiki, err := parseBitableURL(config.BitableURL)
+	rawToken, tableID, isWiki, err := parseBitableURL(config.BitableURL, log)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse bitable URL: %v", err)
 	}
@@ -33,16 +34,20 @@ func NewBitableBillRepository(feishuService *feishu.FeishuService, config *confi
 	appToken := rawToken
 	if isWiki {
 		// 当 URL 是 wiki 链接时，需要先通过 node_token 换取真正的 bitable app_token
+		log.Info("Converting wiki node_token to bitable app_token: node_token=%s", rawToken)
 		appToken, err = feishuService.GetBitableAppTokenFromWikiNode(rawToken)
 		if err != nil {
 			return nil, fmt.Errorf("failed to resolve bitable app token from wiki node: %v", err)
 		}
+		log.Info("Successfully converted wiki node_token to app_token: node_token=%s -> app_token=%s", rawToken, appToken)
+	} else {
+		log.Info("Using direct bitable URL, app_token=%s, table_id=%s", appToken, tableID)
 	}
 
 	return &bitableBillRepository{
 		feishuService: feishuService,
 		config:        config,
-		logger:        logger.GetLogger(),
+		logger:        log,
 		appToken:      appToken,
 		tableID:       tableID,
 	}, nil
@@ -53,31 +58,79 @@ func NewBitableBillRepository(feishuService *feishu.FeishuService, config *confi
 // 支持两种格式：
 // 1) base 链接: https://xxx.feishu.cn/base/APP_TOKEN?table=TABLE_ID
 // 2) wiki 链接: https://xxx.feishu.cn/wiki/NODE_TOKEN?table=TABLE_ID&view=...
-func parseBitableURL(bitableURL string) (token string, tableID string, isWiki bool, err error) {
+func parseBitableURL(bitableURL string, log logger.Logger) (token string, tableID string, isWiki bool, err error) {
 	if bitableURL == "" {
 		return "", "", false, fmt.Errorf("bitable URL is empty")
 	}
 
-	// Parse URL
-	u, err := url.Parse(bitableURL)
-	if err != nil {
-		return "", "", false, fmt.Errorf("invalid URL: %v", err)
+	// Remove protocol prefix (https:// or http://) if present
+	cleanedURL := bitableURL
+	if strings.HasPrefix(cleanedURL, "https://") {
+		cleanedURL = strings.TrimPrefix(cleanedURL, "https://")
+	} else if strings.HasPrefix(cleanedURL, "http://") {
+		cleanedURL = strings.TrimPrefix(cleanedURL, "http://")
 	}
 
-	// Extract token from path
-	pathParts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(pathParts) < 2 || (pathParts[0] != "base" && pathParts[0] != "wiki") {
-		return "", "", false, fmt.Errorf("invalid bitable URL format, expected: https://example.feishu.cn/base/APP_TOKEN?table=TABLE_ID or https://example.feishu.cn/wiki/NODE_TOKEN?table=TABLE_ID")
+	// Split URL into path and query parts
+	parts := strings.SplitN(cleanedURL, "?", 2)
+	pathPart := parts[0]
+	var queryPart string
+	if len(parts) > 1 {
+		queryPart = parts[1]
 	}
-	token = pathParts[1]
-	isWiki = pathParts[0] == "wiki"
 
-	// Extract table id from query parameters
-	tableID = u.Query().Get("table")
+	// Parse path: remove leading and trailing slashes, then split
+	path := strings.Trim(pathPart, "/")
+	if path == "" {
+		return "", "", false, fmt.Errorf("empty path in URL: %s", bitableURL)
+	}
+
+	// Split path by "/" to get domain and path components
+	// Format: domain.com/wiki/TOKEN or domain.com/base/TOKEN
+	pathSegments := strings.Split(path, "/")
+	if len(pathSegments) < 3 {
+		return "", "", false, fmt.Errorf("invalid bitable URL format: path has less than 3 segments (path=%s, segments=%v), expected: example.feishu.cn/base/APP_TOKEN?table=TABLE_ID or example.feishu.cn/wiki/NODE_TOKEN?table=TABLE_ID", path, pathSegments)
+	}
+
+	// Find "base" or "wiki" in path segments
+	var baseOrWikiIndex = -1
+	for i, segment := range pathSegments {
+		if segment == "base" || segment == "wiki" {
+			baseOrWikiIndex = i
+			break
+		}
+	}
+
+	if baseOrWikiIndex == -1 {
+		return "", "", false, fmt.Errorf("invalid bitable URL format: 'base' or 'wiki' not found in path (path=%s, segments=%v)", path, pathSegments)
+	}
+
+	if baseOrWikiIndex+1 >= len(pathSegments) {
+		return "", "", false, fmt.Errorf("invalid bitable URL format: token not found after 'base' or 'wiki' (path=%s)", path)
+	}
+
+	firstPart := pathSegments[baseOrWikiIndex]
+	token = pathSegments[baseOrWikiIndex+1]
+	if token == "" {
+		return "", "", false, fmt.Errorf("empty token in URL path (path=%s)", path)
+	}
+
+	isWiki = firstPart == "wiki"
+
+	// Parse query parameters to get table id
+	if queryPart != "" {
+		queryParams, err := url.ParseQuery(queryPart)
+		if err != nil {
+			return "", "", isWiki, fmt.Errorf("invalid query parameters: %v", err)
+		}
+		tableID = queryParams.Get("table")
+	}
+
 	if tableID == "" {
-		return "", "", isWiki, fmt.Errorf("table id not found in URL")
+		return "", "", isWiki, fmt.Errorf("table id not found in URL query parameters")
 	}
 
+	log.Debug("parseBitableURL: input=%s, result: token=%s, tableID=%s, isWiki=%v", bitableURL, token, tableID, isWiki)
 	return token, tableID, isWiki, nil
 }
 
@@ -109,6 +162,8 @@ func (r *bitableBillRepository) CreateBill(bill *domain.Bill) error {
 	if r.config.FieldOriginalMsg != "" && bill.OriginalMsg != "" {
 		fields[r.config.FieldOriginalMsg] = bill.OriginalMsg
 	}
+
+	r.logger.Debug("Preparing to create bill in bitable: app_token=%s, table_id=%s, fields=%+v", r.appToken, r.tableID, fields)
 
 	recordID, err := r.feishuService.AddRecordToBitable(
 		r.appToken,
