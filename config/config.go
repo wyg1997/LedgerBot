@@ -35,6 +35,7 @@ type FeishuConfig struct {
 	BitableURL   string // 多维表格URL，格式：https://example.feishu.cn/base/APP_TOKEN?table=TABLE_TOKEN
 	EncryptKey   string // 可选的加密密钥
 	Verification string // 可选的验证 token
+	BotName      string // Bot名称，用于识别@提及
 	// 多维表格字段名配置
 	FieldDescription string // 描述字段名
 	FieldAmount      string // 金额字段名
@@ -83,6 +84,7 @@ func LoadConfig() *Config {
 			BitableURL:       getEnv("FEISHU_BITABLE_URL", ""),
 			EncryptKey:       getEnv("FEISHU_ENCRYPT_KEY", ""),
 			Verification:     getEnv("FEISHU_VERIFICATION_TOKEN", ""),
+			BotName:          getEnv("FEISHU_BOT_NAME", "记账管家"),
 			FieldDescription: getEnv("FEISHU_FIELD_DESCRIPTION", "描述"),
 			FieldAmount:      getEnv("FEISHU_FIELD_AMOUNT", "金额"),
 			FieldType:        getEnv("FEISHU_FIELD_TYPE", "类型"),
