@@ -84,17 +84,16 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 	// Handle special case for unknown user
 	systemPrompt := "You are a personal finance bot."
 	if userName == "" {
+		// 未知用户名时：只能识别改名意图，其它内容统一要求用户先提供称呼
 		systemPrompt += " The user has not provided their name yet." +
-			" If they introduce themselves as '我是XXX' or '叫我XXX' or similar, extract the name and call rename_user function." +
-			" After setting the name, confirm it and proceed with normal service." +
-			" Until they provide a name, you can still help with recording transactions."
+			" If they introduce themselves as '我是XXX' or '叫我XXX' or similar, you MUST extract the name and call rename_user function." +
+			" For any other request (including recording transactions, statistics, or normal chat), you MUST politely ask the user to first tell you how to address them, and DO NOT perform any other operation until a name is set."
 	} else {
-		systemPrompt += fmt.Sprintf(" Current user: %s."+
-			" Always decide expense vs income based on description context.", userName)
+		systemPrompt += fmt.Sprintf(" Current user: %s.", userName)
 	}
 
-	systemPrompt += " Always decide expense vs income based on description context." +
-		" '叫我XXX' or '我是XXX' means rename to XXX or extract name from user's introduction." +
+	systemPrompt += " Always decide expense vs income based on description context when recording transactions." +
+		" '叫我XXX' or '我是XXX' means rename to XXX or extract name from the user's introduction." +
 		" Respond in Chinese."
 
 	messages := []domain.AIMessage{
@@ -139,6 +138,12 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 	if err := json.Unmarshal([]byte(choice.Message.FunctionCall.Arguments), &args); err != nil {
 		s.log.Error("parse args: %v", err)
 		return "抱歉，参数解析失败", err
+	}
+
+	// 如果尚未识别出用户名，但 AI 试图调用的并不是改名函数，则拦截并提示用户先提供称呼
+	if userName == "" && funcName != "rename_user" {
+		s.log.Debug("block function %s for unknown user, ask for name first", funcName)
+		return "我还不知道您是谁？请告诉我您的称呼。\n您可以直接说：我是张三", nil
 	}
 
 	// Execute

@@ -110,11 +110,8 @@ func (h *FeishuHandlerAITools) Webhook(w http.ResponseWriter, r *http.Request) {
 func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string, history []domain.AIMessage) {
 	h.logger.Info("Processing from %s: %s", openID, text)
 
-	userName, err := h.ensureUser(openID, messageID)
-	if err != nil {
-		return
-	}
-	h.logger.Info("用户名: %s", userName)
+	userName, hasName := h.getUserNameIfExists(openID)
+	h.logger.Info("用户名: %s，是否已存在映射: %v", userName, hasName)
 
 	// Rename function - simplifies to just updating stored name
 	renameFunc := func(name string) error {
@@ -136,18 +133,16 @@ func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string, hi
 	_ = h.feishuService.ReplyMessage(messageID, response, uuid.New().String())
 }
 
-func (h *FeishuHandlerAITools) ensureUser(openID, messageID string) (string, error) {
-	// Try to get user name from mapping
+// getUserNameIfExists 尝试从映射获取用户名，不存在时返回空字符串
+func (h *FeishuHandlerAITools) getUserNameIfExists(openID string) (string, bool) {
 	userName, err := h.userMappingRepo.GetUserName(openID)
-	if err == nil {
-		h.logger.Debug("获取用户映射: %s -> %s", openID, userName)
-		return userName, nil
+	if err != nil {
+		h.logger.Debug("用户未在映射中找到: %s, err: %v", openID, err)
+		return "", false
 	}
 
-	// User not found, ask them to provide their name
-	replyMsg := "我还不知道您是谁？请告诉我您的称呼。\n您可以直接说：我是张三"
-	_ = h.feishuService.ReplyMessage(messageID, replyMsg, uuid.New().String())
-	return "", fmt.Errorf("unknown user")
+	h.logger.Debug("获取用户映射: %s -> %s", openID, userName)
+	return userName, true
 }
 
 func getString(m map[string]interface{}, key string) string {
