@@ -186,6 +186,106 @@ func (s *FeishuService) AddRecordToBitable(appToken, tableID string, fields map[
 	return recordID, nil
 }
 
+// UpdateRecordToBitable 使用 Bitable SDK 更新记录
+func (s *FeishuService) UpdateRecordToBitable(appToken, tableID, recordID string, fields map[string]interface{}) (string, error) {
+	s.log.Debug("Updating bitable record: app_token=%s, table_id=%s, record_id=%s, fields=%+v", appToken, tableID, recordID, fields)
+
+	req := larkbitable.NewUpdateAppTableRecordReqBuilder().
+		AppToken(appToken).
+		TableId(tableID).
+		RecordId(recordID).
+		AppTableRecord(larkbitable.NewAppTableRecordBuilder().
+			Fields(fields).
+			Build()).
+		Build()
+
+	resp, err := s.client.Bitable.V1.AppTableRecord.Update(s.ctx, req)
+	if err != nil {
+		s.log.Error("Update bitable record API call failed: app_token=%s, table_id=%s, record_id=%s, error=%v", appToken, tableID, recordID, err)
+		return "", fmt.Errorf("update bitable record failed: %w", err)
+	}
+
+	if !resp.Success() {
+		s.log.Error("Update bitable record failed: app_token=%s, table_id=%s, record_id=%s, code=%d, msg=%s", appToken, tableID, recordID, resp.Code, resp.Msg)
+		return "", fmt.Errorf("update bitable record failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	if resp.Data == nil || resp.Data.Record == nil || resp.Data.Record.RecordId == nil {
+		s.log.Error("Update bitable record success but record_id is empty: app_token=%s, table_id=%s, record_id=%s", appToken, tableID, recordID)
+		return "", fmt.Errorf("update bitable record success but record_id is empty")
+	}
+
+	updatedRecordID := *resp.Data.Record.RecordId
+	s.log.Debug("Successfully updated bitable record: record_id=%s, app_token=%s, table_id=%s", updatedRecordID, appToken, tableID)
+	return updatedRecordID, nil
+}
+
+// BatchGetRecordsToBitable 使用 Bitable SDK 批量获取记录
+func (s *FeishuService) BatchGetRecordsToBitable(appToken, tableID string, recordIDs []string) ([]map[string]interface{}, error) {
+	s.log.Debug("Batch getting bitable records: app_token=%s, table_id=%s, record_ids=%v", appToken, tableID, recordIDs)
+
+	if len(recordIDs) == 0 {
+		return []map[string]interface{}{}, nil
+	}
+
+	req := larkbitable.NewBatchGetAppTableRecordReqBuilder().
+		AppToken(appToken).
+		TableId(tableID).
+		Body(larkbitable.NewBatchGetAppTableRecordReqBodyBuilder().
+			RecordIds(recordIDs).
+			AutomaticFields(true).
+			Build()).
+		Build()
+
+	resp, err := s.client.Bitable.V1.AppTableRecord.BatchGet(s.ctx, req)
+	if err != nil {
+		s.log.Error("BatchGet bitable records API call failed: app_token=%s, table_id=%s, record_ids=%v, error=%v", appToken, tableID, recordIDs, err)
+		return nil, fmt.Errorf("batch get bitable records failed: %w", err)
+	}
+
+	if !resp.Success() {
+		s.log.Error("BatchGet bitable records failed: app_token=%s, table_id=%s, record_ids=%v, code=%d, msg=%s", appToken, tableID, recordIDs, resp.Code, resp.Msg)
+		return nil, fmt.Errorf("batch get bitable records failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	if resp.Data == nil || resp.Data.Records == nil {
+		s.log.Error("BatchGet bitable records success but records is empty: app_token=%s, table_id=%s, record_ids=%v", appToken, tableID, recordIDs)
+		return []map[string]interface{}{}, nil
+	}
+
+	// Convert records to maps
+	records := make([]map[string]interface{}, 0, len(resp.Data.Records))
+	for _, rec := range resp.Data.Records {
+		record := make(map[string]interface{})
+		if rec.RecordId != nil {
+			record["_id"] = *rec.RecordId
+		}
+		if rec.Fields != nil {
+			record["fields"] = rec.Fields
+		}
+		records = append(records, record)
+	}
+
+	s.log.Debug("Successfully batch got bitable records: count=%d, app_token=%s, table_id=%s", len(records), appToken, tableID)
+	return records, nil
+}
+
+// GetRecordToBitable 使用 Bitable SDK 通过 record_id 获取单条记录（使用 BatchGet）
+func (s *FeishuService) GetRecordToBitable(appToken, tableID, recordID string) (map[string]interface{}, error) {
+	s.log.Debug("Getting bitable record: app_token=%s, table_id=%s, record_id=%s", appToken, tableID, recordID)
+
+	records, err := s.BatchGetRecordsToBitable(appToken, tableID, []string{recordID})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(records) == 0 {
+		return nil, fmt.Errorf("record not found: %s", recordID)
+	}
+
+	return records[0], nil
+}
+
 func (s *FeishuService) ListRecords(appToken, tableToken string, pageSize, pageToken int) ([]map[string]interface{}, error) {
 	// TODO: Implement with SDK
 	return nil, fmt.Errorf("ListRecords not yet implemented with SDK")

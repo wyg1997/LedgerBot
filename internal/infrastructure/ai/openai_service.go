@@ -55,6 +55,7 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 		" When recording transactions, the date is automatically set to the current date by the server, so you should NOT ask for or use date information from the user." +
 		" CRITICAL RULE FOR CATEGORY SELECTION: When calling record_transaction, you MUST automatically select a category from the enum list (餐饮, 交通, 购物, 娱乐, 医疗, 教育, 住房, 水电费, 通讯, 服装, 收入, 其它) WITHOUT asking the user. NEVER ask questions like '这是什么分类？', '请选择分类', '这是什么类型的支出？' or any similar questions about category. Just analyze the transaction description and immediately choose the most appropriate category. If you're unsure, use '其它'. This is mandatory - you must always provide a category value, never leave it empty or ask the user to choose." +
 		" MULTIPLE TRANSACTIONS: If the user mentions multiple transactions in a single message (e.g., '午饭30元，打车45元' or '今天花了30块吃饭，45块打车'), you MUST call record_transaction MULTIPLE TIMES - once for each transaction. You can make multiple tool calls in a single response. Each transaction should be recorded separately with its own record_transaction call. Do NOT combine multiple transactions into a single record_transaction call." +
+		" UPDATE TRANSACTIONS: If the user wants to update an existing transaction, use the update_transaction tool. The user will provide the record_id (from the original transaction response, shown as 🆔). You can update one or more fields (description, amount, type, category). If the user mentions multiple updates in a single message, you MUST call update_transaction MULTIPLE TIMES - once for each record that needs to be updated. Only include fields that the user wants to change - do not include unchanged fields. NOTE: The original_message field will be automatically updated with the user's current update instruction - you do NOT need to include it in the tool call." +
 		" When calling record_transaction, you should provide the original_message parameter with the most relevant user message from the conversation that best represents what the user said about this transaction." +
 		" For thread conversations, extract the most appropriate user message from the conversation history that led to this transaction." +
 		" '叫我XXX' or '我是XXX' means rename to XXX or extract name from the user's introduction." +
@@ -142,6 +143,45 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 				}),
 			},
 		},
+		{
+			Type: openai.ToolTypeFunction,
+			Function: &openai.FunctionDefinition{
+				Name:        "update_transaction",
+				Description: "Update an existing financial transaction record. Use this when the user wants to modify a previously recorded transaction. You need the record_id from the original transaction record.",
+				Parameters: mustMarshalJSON(map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"record_id": map[string]string{
+							"type":        "string",
+							"description": "The record_id of the transaction to update (from the original record response)",
+						},
+						"description": map[string]interface{}{
+							"type":        "string",
+							"description": "Updated description of the transaction (optional, only include if user wants to change it)",
+						},
+						"amount": map[string]interface{}{
+							"type":        "number",
+							"description": "Updated amount of money (optional, only include if user wants to change it, must be > 0)",
+						},
+						"type": map[string]interface{}{
+							"type":        "string",
+							"enum":        []string{"expense", "income"},
+							"description": "Updated type of transaction (optional, only include if user wants to change it)",
+						},
+						"category": map[string]interface{}{
+							"type":        "string",
+							"enum":        []string{"餐饮", "交通", "购物", "娱乐", "医疗", "教育", "住房", "水电费", "通讯", "服装", "收入", "其它"},
+							"description": "Updated transaction category (optional, only include if user wants to change it). CRITICAL: You MUST automatically select a category from this enum list WITHOUT asking the user if category needs to be updated.",
+						},
+						"original_message": map[string]interface{}{
+							"type":        "string",
+							"description": "This field will be automatically updated with the user's current update instruction/command. You do NOT need to provide this parameter - it is handled automatically by the system. Only include if you have a specific reason to override the automatic value.",
+						},
+					},
+					"required": []string{"record_id"},
+				}),
+			},
+		},
 	}
 
 	// 4. Build request
@@ -215,6 +255,9 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 		switch name {
 		case "record_transaction":
 			result, err = s.handleRecordTransaction(args, billService.(*BillService))
+		case "update_transaction":
+			// Pass current input so we can use it as original_message for updates
+			result, err = s.handleUpdateTransaction(args, billService.(*BillService), input)
 		case "rename_user":
 			result, err = s.handleRenameUser(args, renameService.(*RenameService))
 		default:
@@ -320,6 +363,90 @@ func (s *OpenAIService) handleRenameUser(args map[string]interface{}, svc *Renam
 	return fmt.Sprintf("✅ 设置成功！从现在起，我将称呼您为：%s", name), nil
 }
 
+func (s *OpenAIService) handleUpdateTransaction(args map[string]interface{}, svc *BillService, currentInput string) (string, error) {
+	recordID := getString(args, "record_id")
+	if recordID == "" {
+		s.log.Error("Missing record_id in update_transaction args")
+		return "请提供记录ID", fmt.Errorf("record_id is required")
+	}
+
+	// Extract optional update fields
+	var description *string
+	var amount *float64
+	var billType *domain.BillType
+	var category *string
+	var originalMsg *string
+
+	if desc := getString(args, "description"); desc != "" {
+		description = &desc
+	}
+	if amt := getFloat64(args, "amount"); amt > 0 {
+		amount = &amt
+	}
+	if transType := getString(args, "type"); transType != "" {
+		bt := domain.BillTypeExpense
+		if transType == "income" {
+			bt = domain.BillTypeIncome
+		}
+		billType = &bt
+	}
+	if cat := getString(args, "category"); cat != "" {
+		category = &cat
+	}
+	
+	// Get the original bill to retrieve the existing original_message
+	// We need to combine the original message with the current update instruction
+	originalBill, err := svc.billUseCase.GetBill(recordID)
+	if err != nil {
+		s.log.Error("Failed to get original bill for update: %v", err)
+		// If we can't get the original bill, just use current input as original_message
+		if currentInput != "" {
+			originalMsg = &currentInput
+		}
+	} else {
+		// Combine original message with current update instruction
+		combinedMsg := originalBill.OriginalMsg
+		if combinedMsg != "" && currentInput != "" {
+			combinedMsg = combinedMsg + " | " + currentInput
+		} else if currentInput != "" {
+			combinedMsg = currentInput
+		} else if combinedMsg == "" {
+			// Fallback to AI-provided original_message if both are empty
+			if origMsg := getString(args, "original_message"); origMsg != "" {
+				combinedMsg = origMsg
+			}
+		}
+		if combinedMsg != "" {
+			originalMsg = &combinedMsg
+		}
+	}
+
+	// Check if at least one field is being updated
+	if description == nil && amount == nil && billType == nil && category == nil && originalMsg == nil {
+		return "请提供至少一个要更新的字段", fmt.Errorf("no fields to update")
+	}
+
+	bill, err := svc.UpdateBill(recordID, description, amount, billType, category, originalMsg)
+	if err != nil {
+		s.log.Error("Failed to update bill: %v", err)
+		return "更新失败", err
+	}
+
+	sign := "-"
+	if bill.Type == domain.BillTypeIncome {
+		sign = "+"
+	}
+
+	response := fmt.Sprintf("✅ 更新成功！\n📋 %s\n💰 %s¥%.2f\n🏷️ %s",
+		bill.Description, sign, bill.Amount, bill.Category)
+	
+	if bill.RecordID != "" {
+		response += fmt.Sprintf("\n🆔 %s", bill.RecordID)
+	}
+
+	return response, nil
+}
+
 // BillService handles bill operations inside AI service
 type BillService struct {
 	billUseCase domain.BillUseCase
@@ -345,6 +472,39 @@ func (s *BillService) CreateBill(description string, amount float64, billType do
 		originalMsg = s.originalMsg
 	}
 	return s.billUseCase.CreateBill(s.userName, s.userID, originalMsg, description, amount, billType, date, &category)
+}
+
+// UpdateBill updates an existing bill by record_id
+// Directly updates without querying - only updates fields that are provided
+func (s *BillService) UpdateBill(recordID string, description *string, amount *float64, billType *domain.BillType, category *string, originalMsg *string) (*domain.Bill, error) {
+	// Build updates map with only the fields that are provided
+	updates := make(map[string]interface{})
+	if description != nil {
+		updates["description"] = *description
+	}
+	if amount != nil {
+		updates["amount"] = *amount
+	}
+	if billType != nil {
+		updates["type"] = *billType
+	}
+	if category != nil {
+		updates["category"] = *category
+	}
+	if originalMsg != nil {
+		updates["original_message"] = *originalMsg
+	}
+	
+	// Use case UpdateBill will detect record_id (starts with "rec") and update directly without querying
+	updatedBill, err := s.billUseCase.UpdateBill(recordID, updates)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Ensure record_id is set in the returned bill
+	updatedBill.RecordID = recordID
+	
+	return updatedBill, nil
 }
 
 // RenameService handles rename

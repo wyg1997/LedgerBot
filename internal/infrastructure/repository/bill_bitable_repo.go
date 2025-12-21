@@ -194,8 +194,17 @@ func (r *bitableBillRepository) CreateBill(bill *domain.Bill) error {
 
 // GetBill gets a bill by ID from bitable
 func (r *bitableBillRepository) GetBill(id string) (*domain.Bill, error) {
-	// For bitable, we need to query by bill ID field
-	// This requires implementing query functionality in FeishuService
+	// If id is a record_id (starts with "rec"), get directly by record_id
+	if len(id) >= 3 && id[:3] == "rec" {
+		record, err := r.feishuService.GetRecordToBitable(r.appToken, r.tableID, id)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get record by record_id: %v", err)
+		}
+		return r.convertRecordToBill(record)
+	}
+
+	// For other IDs, use the old method (query all and filter)
+	// This is less efficient but maintains backward compatibility
 	bills, _, err := r.ListBills("", nil, nil, nil, nil, 0, 100) // Get all and filter
 	if err != nil {
 		return nil, err
@@ -211,12 +220,78 @@ func (r *bitableBillRepository) GetBill(id string) (*domain.Bill, error) {
 }
 
 // UpdateBill updates a bill in bitable
+// Note: This method supports partial updates - only fields that are set in the bill will be updated
 func (r *bitableBillRepository) UpdateBill(bill *domain.Bill) error {
-	// In bitable, we would need to:
-	// 1. Find the record by bill ID
-	// 2. Update the record with new values
-	// This requires implementing update functionality in FeishuService
-	return fmt.Errorf("update bill not implemented for bitable storage")
+	if bill.RecordID == "" {
+		return fmt.Errorf("record_id is required for updating bill")
+	}
+
+	// Build fields map - only include fields that are being updated (non-zero/non-empty values)
+	fields := make(map[string]interface{})
+
+	// Only update description if provided
+	if bill.Description != "" {
+		fields[r.config.FieldDescription] = bill.Description
+	}
+
+	// Only update amount if provided (non-zero)
+	if bill.Amount > 0 {
+		fields[r.config.FieldAmount] = bill.Amount
+	}
+
+	// Only update category if provided
+	if bill.Category != "" {
+		fields[r.config.FieldType] = bill.Category
+	}
+
+	// Only update type if provided
+	if bill.Type != "" {
+		billType := "支出"
+		if bill.Type == domain.BillTypeIncome {
+			billType = "收入"
+		}
+		fields[r.config.FieldCategory] = billType
+	}
+
+	// Only update date if provided (non-zero time)
+	if !bill.Date.IsZero() {
+		dateTimestamp := bill.Date.UnixMilli()
+		fields[r.config.FieldDate] = dateTimestamp
+	}
+
+	// Only update user name if provided
+	if bill.UserName != "" {
+		fields[r.config.FieldUserName] = bill.UserName
+	}
+
+	// Add original message if configured and provided
+	if r.config.FieldOriginalMsg != "" && bill.OriginalMsg != "" {
+		fields[r.config.FieldOriginalMsg] = bill.OriginalMsg
+	}
+
+	if len(fields) == 0 {
+		return fmt.Errorf("no fields to update")
+	}
+
+	r.logger.Debug("Preparing to update bill in bitable: app_token=%s, table_id=%s, record_id=%s, fields=%+v", r.appToken, r.tableID, bill.RecordID, fields)
+
+	updatedRecordID, err := r.feishuService.UpdateRecordToBitable(
+		r.appToken,
+		r.tableID,
+		bill.RecordID,
+		fields,
+	)
+
+	if err != nil {
+		r.logger.Error("Failed to update bill in bitable: %v", err)
+		return fmt.Errorf("failed to update bill: %v", err)
+	}
+
+	// Update bill's record_id in case it changed (shouldn't happen, but just in case)
+	bill.RecordID = updatedRecordID
+
+	r.logger.Info("Updated bill in bitable: RecordID=%s, BillID=%s", updatedRecordID, bill.ID)
+	return nil
 }
 
 // DeleteBill deletes a bill from bitable
@@ -425,8 +500,17 @@ func (r *bitableBillRepository) convertRecordToBill(record map[string]interface{
 // Helper functions to extract field values
 func getStringField(fields map[string]interface{}, fieldName string) string {
 	if val, ok := fields[fieldName]; ok {
+		// Handle string format (direct value)
 		if str, ok := val.(string); ok {
 			return str
+		}
+		// Handle array format from BatchGet API: [{"text": "value", "type": "text"}]
+		if arr, ok := val.([]interface{}); ok && len(arr) > 0 {
+			if item, ok := arr[0].(map[string]interface{}); ok {
+				if text, ok := item["text"].(string); ok {
+					return text
+				}
+			}
 		}
 	}
 	return ""

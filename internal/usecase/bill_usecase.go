@@ -81,33 +81,75 @@ func (u *BillUseCaseImpl) GetBill(id string) (*domain.Bill, error) {
 }
 
 // UpdateBill updates a bill
+// If id starts with "rec" (record_id format), it will update directly without querying
 func (u *BillUseCaseImpl) UpdateBill(id string, updates map[string]interface{}) (*domain.Bill, error) {
-	bill, err := u.billRepo.GetBill(id)
-	if err != nil {
-		return nil, err
+	var bill *domain.Bill
+	
+	// If id is a record_id (starts with "rec"), update directly without querying
+	// This avoids the need to implement ListRecordsWithFilter for simple updates
+	if len(id) >= 3 && id[:3] == "rec" {
+		// Direct update by record_id - construct bill with only fields to update
+		bill = &domain.Bill{
+			ID:       id,
+			RecordID: id,
+		}
+		
+		// Apply updates to bill object (only non-empty values)
+		if desc, ok := updates["description"].(string); ok && desc != "" {
+			bill.Description = desc
+		}
+		if amount, ok := updates["amount"].(float64); ok && amount > 0 {
+			bill.Amount = amount
+		}
+		if category, ok := updates["category"].(string); ok && category != "" {
+			bill.Category = category
+		}
+		if date, ok := updates["date"].(*time.Time); ok && date != nil {
+			bill.Date = *date
+		}
+		if billType, ok := updates["type"].(domain.BillType); ok && billType != "" {
+			bill.Type = billType
+		}
+		if originalMsg, ok := updates["original_message"].(string); ok && originalMsg != "" {
+			bill.OriginalMsg = originalMsg
+		}
+	} else {
+		// Traditional flow: get bill first, then update
+		var err error
+		bill, err = u.billRepo.GetBill(id)
+		if err != nil {
+			return nil, err
+		}
+
+		// Apply updates
+		if desc, ok := updates["description"].(string); ok {
+			bill.Description = desc
+		}
+		if amount, ok := updates["amount"].(float64); ok {
+			bill.Amount = amount
+		}
+		if category, ok := updates["category"].(string); ok {
+			bill.Category = category
+		}
+		if date, ok := updates["date"].(*time.Time); ok {
+			bill.Date = *date
+		}
+		if billType, ok := updates["type"].(domain.BillType); ok {
+			bill.Type = billType
+		}
+		if originalMsg, ok := updates["original_message"].(string); ok {
+			bill.OriginalMsg = originalMsg
+		}
 	}
 
-	// Apply updates
-	if desc, ok := updates["description"].(string); ok {
-		bill.Description = desc
-	}
-	if amount, ok := updates["amount"].(float64); ok {
-		bill.Amount = amount
-	}
-	if category, ok := updates["category"].(string); ok {
-		bill.Category = category
-	}
-	if date, ok := updates["date"].(*time.Time); ok {
-		bill.Date = *date
-	}
-	if billType, ok := updates["type"].(domain.BillType); ok {
-		bill.Type = billType
-	}
-
-	// bill.UpdatedAt = time.Now()  // Removed: Bill struct doesn't have UpdatedAt field
-
+	// Update through repository (supports partial updates)
 	if err := u.billRepo.UpdateBill(bill); err != nil {
 		return nil, fmt.Errorf("failed to update bill: %v", err)
+	}
+
+	// Ensure RecordID is set for return value
+	if bill.RecordID == "" {
+		bill.RecordID = id
 	}
 
 	return bill, nil
