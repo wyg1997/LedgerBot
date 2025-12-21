@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 	"github.com/wyg1997/LedgerBot/internal/infrastructure/repository"
 	"github.com/wyg1997/LedgerBot/internal/interfaces/http/handler"
 	"github.com/wyg1997/LedgerBot/internal/usecase"
-	"github.com/wyg1997/LedgerBot/pkg/cache"
 	"github.com/wyg1997/LedgerBot/pkg/logger"
 )
 
@@ -48,10 +46,6 @@ func main() {
 	if err != nil {
 		log.Fatal("Failed to create bill repository: %v", err)
 	}
-
-	// Initialize cache
-	mappingCache := cache.NewUserMappingCache(filepath.Join(cfg.Storage.DataDir, "user_mapping_cache"))
-	_ = mappingCache // Will be used for caching if needed
 
 	// Initialize use cases
 	billUseCase := usecase.NewBillUseCase(billRepo, userMappingRepo)
