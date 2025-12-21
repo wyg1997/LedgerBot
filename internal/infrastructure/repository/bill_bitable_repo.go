@@ -452,6 +452,9 @@ func (r *bitableBillRepository) QueryTransactions(userName string, startTime, en
 	startTimestamp := startTime.UnixMilli()
 	endTimestamp := endTime.UnixMilli()
 
+	r.logger.Debug("QueryTransactions: user_name=%s, start_time=%s (%d), end_time=%s (%d), top_n=%d",
+		userName, startTime.Format("2006-01-02 15:04:05"), startTimestamp, endTime.Format("2006-01-02 15:04:05"), endTimestamp, topN)
+
 	// Get all field names
 	fieldNames := []string{
 		r.config.FieldDescription,
@@ -470,21 +473,23 @@ func (r *bitableBillRepository) QueryTransactions(userName string, startTime, en
 		return nil, 0, 0, fmt.Errorf("failed to query transactions: %v", err)
 	}
 
-	// Convert records to bills and filter by user if specified
+	r.logger.Debug("QueryTransactions: received %d records from bitable", len(records))
+
+	// Convert records to bills (no user filtering - show all family members' transactions)
 	var bills []*domain.Bill
 	var totalIncome, totalExpense float64
 
-	for _, record := range records {
+	for i, record := range records {
 		bill, err := r.convertRecordToBill(record)
 		if err != nil {
 			r.logger.Error("Failed to convert record to bill: %v", err)
 			continue
 		}
 
-		// Filter by user if specified
-		if userName != "" && bill.UserName != userName {
-			continue
-		}
+		r.logger.Debug("  Record[%d]: record_id=%s, description=%s, amount=%.2f, type=%s, category=%s, date=%s, user_name=%s",
+			i, bill.RecordID, bill.Description, bill.Amount, bill.Type, bill.Category, bill.Date.Format("2006-01-02 15:04:05"), bill.UserName)
+
+		// Note: No user filtering - show all family members' transactions
 
 		// Calculate totals
 		if bill.Type == domain.BillTypeIncome {
@@ -495,6 +500,8 @@ func (r *bitableBillRepository) QueryTransactions(userName string, startTime, en
 
 		bills = append(bills, bill)
 	}
+
+	r.logger.Debug("QueryTransactions: converted %d records to bills (no user filtering applied)", len(bills))
 
 	// Sort by amount descending
 	for i := 0; i < len(bills)-1; i++ {

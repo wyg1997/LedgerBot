@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/larksuite/oapi-sdk-go/v3"
 	larkbitable "github.com/larksuite/oapi-sdk-go/v3/service/bitable/v1"
@@ -325,8 +326,8 @@ func (s *FeishuService) ListRecordsWithFilter(appToken, tableToken string, filte
 
 // SearchRecords 使用 Bitable SDK 搜索记录
 func (s *FeishuService) SearchRecords(appToken, tableID string, startTime, endTime int64, fieldNames []string, pageSize int) ([]map[string]interface{}, int, string, error) {
-	s.log.Debug("Searching bitable records: app_token=%s, table_id=%s, start_time=%d, end_time=%d, page_size=%d", 
-		appToken, tableID, startTime, endTime, pageSize)
+	s.log.Debug("Searching bitable records: app_token=%s, table_id=%s, start_time=%d (%s), end_time=%d (%s), page_size=%d, field_names=%v", 
+		appToken, tableID, startTime, time.UnixMilli(startTime).Format("2006-01-02 15:04:05"), endTime, time.UnixMilli(endTime).Format("2006-01-02 15:04:05"), pageSize, fieldNames)
 
 	// Build filter conditions for date range
 	conditions := []*larkbitable.Condition{
@@ -407,6 +408,15 @@ func (s *FeishuService) SearchRecords(appToken, tableID string, startTime, endTi
 	}
 
 	s.log.Debug("Successfully searched bitable records: count=%d, total=%d, app_token=%s, table_id=%s", len(records), total, appToken, tableID)
+	
+	// Debug: Print first few records
+	for i := 0; i < len(records) && i < 3; i++ {
+		record := records[i]
+		if fields, ok := record["fields"].(map[string]interface{}); ok {
+			s.log.Debug("  Sample record[%d]: record_id=%v, fields=%v", i, record["record_id"], fields)
+		}
+	}
+	
 	return records, total, pageToken, nil
 }
 

@@ -558,11 +558,20 @@ func (s *OpenAIService) handleQueryTransactions(args map[string]interface{}, svc
 		}
 	}
 
+	s.log.Debug("QueryTransactions params: time_range_type=%s, start_time=%s, end_time=%s, top_n=%d, user_name=%s",
+		timeRangeTypeStr, startTime.Format("2006-01-02 15:04:05"), endTime.Format("2006-01-02 15:04:05"), topN, svc.userName)
+
 	// Query transactions
 	bills, totalIncome, totalExpense, err := svc.QueryTransactions(startTime, endTime, topN)
 	if err != nil {
 		s.log.Error("Failed to query transactions: %v", err)
 		return "查询失败", err
+	}
+
+	s.log.Debug("QueryTransactions result: bills_count=%d, total_income=%.2f, total_expense=%.2f", len(bills), totalIncome, totalExpense)
+	for i, bill := range bills {
+		s.log.Debug("  Bill[%d]: record_id=%s, description=%s, amount=%.2f, type=%s, category=%s, date=%s, user_name=%s",
+			i, bill.RecordID, bill.Description, bill.Amount, bill.Type, bill.Category, bill.Date.Format("2006-01-02 15:04:05"), bill.UserName)
 	}
 
 	// Format response
