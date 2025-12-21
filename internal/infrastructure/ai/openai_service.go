@@ -580,12 +580,11 @@ func (s *OpenAIService) handleQueryTransactions(args map[string]interface{}, svc
 			if bill.Type == domain.BillTypeIncome {
 				sign = "+"
 			}
-			response += fmt.Sprintf("%d. %s %s¥%.2f [%s]", 
+			response += fmt.Sprintf("%d. %s %s¥%.2f [%s]\n", 
 				i+1, bill.Description, sign, bill.Amount, bill.Category)
 			if bill.RecordID != "" {
-				response += fmt.Sprintf(" 🆔 %s", bill.RecordID)
+				response += fmt.Sprintf("   🆔 %s\n", bill.RecordID)
 			}
-			response += "\n"
 		}
 	} else {
 		response += "📝 暂无交易记录\n"
