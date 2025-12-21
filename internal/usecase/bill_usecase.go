@@ -30,10 +30,14 @@ func NewBillUseCase(
 
 // CreateBill creates a new bill with AI categorization if needed
 func (u *BillUseCaseImpl) CreateBill(userName string, userID string, originalMsg string, description string, amount float64, billType domain.BillType, date *time.Time, category *string) (*domain.Bill, error) {
+	u.logger.Info("BillUseCase.CreateBill called: userName=%s, userID=%s, description=%s, amount=%.2f, billType=%s, category=%v, originalMsg=%s",
+		userName, userID, description, amount, billType, category, originalMsg)
+
 	// If category is not provided, use default
 	if category == nil || *category == "" {
 		defaultCat := "其他"
 		category = &defaultCat
+		u.logger.Info("Category not provided, using default: %s", defaultCat)
 	}
 
 	// Generate bill ID
@@ -43,6 +47,7 @@ func (u *BillUseCaseImpl) CreateBill(userName string, userID string, originalMsg
 	if date == nil {
 		now := time.Now()
 		date = &now
+		u.logger.Info("Date not provided, using current time: %s", date.Format(time.RFC3339))
 	}
 
 	bill := &domain.Bill{
@@ -56,11 +61,17 @@ func (u *BillUseCaseImpl) CreateBill(userName string, userID string, originalMsg
 		OriginalMsg: originalMsg,
 	}
 
+	u.logger.Info("Calling billRepo.CreateBill: billID=%s, description=%s, amount=%.2f, type=%s, category=%s, userName=%s, date=%s",
+		bill.ID, bill.Description, bill.Amount, bill.Type, bill.Category, bill.UserName, bill.Date.Format(time.RFC3339))
+
 	if err := u.billRepo.CreateBill(bill); err != nil {
+		u.logger.Error("billRepo.CreateBill failed: %v, billID=%s, description=%s, amount=%.2f, type=%s, category=%s, userName=%s",
+			err, bill.ID, bill.Description, bill.Amount, bill.Type, bill.Category, bill.UserName)
 		return nil, fmt.Errorf("failed to create bill: %v", err)
 	}
 
-	u.logger.Info("Created bill: ID=%s, Description=%s, Amount=%.2f, Category=%s, UserName=%s", bill.ID, bill.Description, bill.Amount, bill.Category, bill.UserName)
+	u.logger.Info("Bill created successfully: ID=%s, Description=%s, Amount=%.2f, Category=%s, UserName=%s, OriginalMsg=%s",
+		bill.ID, bill.Description, bill.Amount, bill.Category, bill.UserName, bill.OriginalMsg)
 	return bill, nil
 }
 

@@ -185,9 +185,11 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 			return "抱歉，参数解析失败", err
 		}
 
+		s.log.Info("AI toolcall triggered: tool=%s, user=%s, args=%+v", name, userName, args)
+
 		// 未知用户时，只允许 rename_user
 		if userName == "" && name != "rename_user" {
-			s.log.Debug("block tool %s for unknown user, ask for name first", name)
+			s.log.Info("Blocking tool %s for unknown user, asking for name first", name)
 			return "我还不知道您是谁？请告诉我您的称呼。\n您可以直接说：我是张三", nil
 		}
 
@@ -219,6 +221,7 @@ func (s *OpenAIService) handleRecordTransaction(args map[string]interface{}, svc
 	originalMsg := getString(args, "original_message")
 
 	if description == "" || amount <= 0 {
+		s.log.Error("Invalid transaction args: description=%s, amount=%.2f", description, amount)
 		return "请提供有效的交易信息", fmt.Errorf("invalid args")
 	}
 
@@ -230,7 +233,7 @@ func (s *OpenAIService) handleRecordTransaction(args map[string]interface{}, svc
 
 	bill, err := svc.CreateBill(description, amount, bt, nil, category, originalMsg)
 	if err != nil {
-		s.log.Error("create bill: %v", err)
+		s.log.Error("Failed to create bill: %v", err)
 		return "记账失败", err
 	}
 
@@ -246,11 +249,12 @@ func (s *OpenAIService) handleRecordTransaction(args map[string]interface{}, svc
 func (s *OpenAIService) handleRenameUser(args map[string]interface{}, svc *RenameService) (string, error) {
 	name := getString(args, "name")
 	if name == "" {
+		s.log.Error("Empty name provided for rename_user")
 		return "名字不能为空", fmt.Errorf("empty name")
 	}
 
 	if err := svc.Rename(name); err != nil {
-		s.log.Error("rename: %v", err)
+		s.log.Error("Failed to rename user: %v", err)
 		return "设置失败", err
 	}
 
