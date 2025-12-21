@@ -1,0 +1,61 @@
+# Git 相关
+.git
+.gitignore
+.gitattributes
+
+# 文档
+README.md
+FEATURES.md
+docs/
+*.md
+
+# 环境配置（运行时通过环境变量或挂载提供）
+.env
+.env.example
+.env.local
+.env.*.local
+
+# IDE 配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 测试文件
+*_test.go
+test/
+tests/
+
+# 构建产物
+ledgerbot
+*.exe
+*.dll
+*.so
+*.dylib
+
+# 临时文件
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+
+# 数据目录（运行时通过挂载提供）
+data/
+*.json
+
+# Docker 相关
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# 其他
+*.bak
+*.orig
+
