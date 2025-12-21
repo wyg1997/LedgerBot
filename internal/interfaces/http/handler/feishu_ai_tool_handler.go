@@ -110,6 +110,13 @@ func (h *FeishuHandlerAITools) Webhook(w http.ResponseWriter, r *http.Request) {
 func (h *FeishuHandlerAITools) processMessage(openID, text, messageID string, history []domain.AIMessage) {
 	// text is the current/latest message from the webhook, which will be used as originalMsg
 	// For thread conversations, we only record the latest message as originalMsg, not the entire history
+	
+	// If message is empty, fill with default greeting to avoid triggering rename
+	if text == "" {
+		text = "你好"
+		h.logger.Debug("Empty message detected, filled with default greeting: 你好")
+	}
+	
 	h.logger.Info("Processing from %s: %s", openID, text)
 
 	userName, hasName := h.getUserNameIfExists(openID)
