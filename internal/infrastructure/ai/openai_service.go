@@ -294,8 +294,15 @@ func (s *OpenAIService) handleRecordTransaction(args map[string]interface{}, svc
 		sign = "+"
 	}
 
-	return fmt.Sprintf("✅ 记账成功！\n📋 %s\n💰 %s¥%.2f\n🏷️ %s",
-		bill.Description, sign, bill.Amount, bill.Category), nil
+	// Include record_id in response for future updates
+	response := fmt.Sprintf("✅ 记账成功！\n📋 %s\n💰 %s¥%.2f\n🏷️ %s",
+		bill.Description, sign, bill.Amount, bill.Category)
+	
+	if bill.RecordID != "" {
+		response += fmt.Sprintf("\n🆔 %s", bill.RecordID)
+	}
+
+	return response, nil
 }
 
 func (s *OpenAIService) handleRenameUser(args map[string]interface{}, svc *RenameService) (string, error) {

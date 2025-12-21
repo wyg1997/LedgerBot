@@ -22,6 +22,7 @@ type Bill struct {
 	Date        time.Time `json:"date"`        // 日期
 	UserName    string    `json:"user_name"`   // 用户姓名（来自映射）
 	OriginalMsg string    `json:"original_msg,omitempty"` // 用户原始消息
+	RecordID    string    `json:"record_id,omitempty"`    // 存储系统的记录ID（如 Bitable 的 record_id）
 }
 
 // BillRepository interface for bill data access

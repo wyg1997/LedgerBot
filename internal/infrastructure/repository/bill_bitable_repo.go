@@ -185,6 +185,9 @@ func (r *bitableBillRepository) CreateBill(bill *domain.Bill) error {
 		return fmt.Errorf("failed to create bill: %v", err)
 	}
 
+	// Store record_id in bill for later use (e.g., updating the record)
+	bill.RecordID = recordID
+
 	r.logger.Info("Created bill in bitable: RecordID=%s, BillID=%s", recordID, bill.ID)
 	return nil
 }
@@ -381,6 +384,7 @@ func (r *bitableBillRepository) convertRecordToBill(record map[string]interface{
 	// Parse bill data
 	bill := &domain.Bill{
 		ID:          recordID,
+		RecordID:    recordID, // Bitable record_id is the same as _id
 		Description: getStringField(fields, r.config.FieldDescription),
 		Amount:      getNumberField(fields, r.config.FieldAmount),
 		Category:    getStringField(fields, r.config.FieldType),
