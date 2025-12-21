@@ -170,6 +170,11 @@ func (u *BillUseCaseImpl) GetMonthlySummary(userID string, year, month int) (*do
 	return u.billRepo.GetMonthlySummary(userID, year, month)
 }
 
+// QueryTransactions queries transactions within a time range
+func (u *BillUseCaseImpl) QueryTransactions(userName string, startTime, endTime time.Time, topN int) ([]*domain.Bill, float64, float64, error) {
+	return u.billRepo.QueryTransactions(userName, startTime, endTime, topN)
+}
+
 // SuggestCategory suggests category for a bill description
 func (u *BillUseCaseImpl) SuggestCategory(userID string, description string) ([]string, error) {
 	// TODO: Implement AI-based category suggestion

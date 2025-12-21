@@ -47,6 +47,9 @@ type BillRepository interface {
 
 	// GetCategories gets all categories for a user
 	GetCategories(userName string) ([]string, error)
+
+	// QueryTransactions queries transactions within a time range
+	QueryTransactions(userName string, startTime, endTime time.Time, topN int) ([]*Bill, float64, float64, error)
 }
 
 // MonthlySummary represents monthly financial summary
@@ -81,6 +84,9 @@ type BillUseCase interface {
 
 	// SuggestCategory suggests category for a bill description
 	SuggestCategory(userName string, description string) ([]string, error)
+
+	// QueryTransactions queries transactions within a time range and returns summary
+	QueryTransactions(userName string, startTime, endTime time.Time, topN int) ([]*Bill, float64, float64, error)
 }
 
 // CategorySuggestion represents category suggestion from AI

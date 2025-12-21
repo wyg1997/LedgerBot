@@ -9,6 +9,7 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 	"github.com/wyg1997/LedgerBot/config"
 	"github.com/wyg1997/LedgerBot/internal/domain"
+	"github.com/wyg1997/LedgerBot/internal/infrastructure/repository"
 	"github.com/wyg1997/LedgerBot/pkg/logger"
 )
 
@@ -42,6 +43,9 @@ func NewOpenAIService(cfg *config.AIConfig) domain.AIService {
 
 // Execute processes user input via AI tool-calling using go-openai Tools API
 func (s *OpenAIService) Execute(input string, userName string, billService domain.BillServiceInterface, renameService domain.RenameServiceInterface, history []domain.AIMessage) (string, error) {
+	// Get current year dynamically
+	currentYear := time.Now().Year()
+	
 	// 1. System prompt
 	systemPrompt := "You are a personal finance bot."
 	if userName == "" {
@@ -57,6 +61,7 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 		" MULTIPLE TRANSACTIONS: If the user mentions multiple transactions in a single message (e.g., '午饭30元，打车45元' or '今天花了30块吃饭，45块打车'), you MUST call record_transaction MULTIPLE TIMES - once for each transaction. You can make multiple tool calls in a single response. Each transaction should be recorded separately with its own record_transaction call. Do NOT combine multiple transactions into a single record_transaction call." +
 		" UPDATE TRANSACTIONS: If the user wants to update an existing transaction, use the update_transaction tool. The user will provide the record_id (from the original transaction response, shown as 🆔). You can update one or more fields (description, amount, type, category). If the user mentions multiple updates in a single message, you MUST call update_transaction MULTIPLE TIMES - once for each record that needs to be updated. Only include fields that the user wants to change - do not include unchanged fields. NOTE: The original_message field will be automatically updated with the user's current update instruction - you do NOT need to include it in the tool call." +
 		" DELETE TRANSACTIONS: If the user wants to delete an existing transaction, use the delete_transaction tool. The user will provide the record_id (from the original transaction response, shown as 🆔). If the user mentions multiple deletions in a single message, you MUST call delete_transaction MULTIPLE TIMES - once for each record that needs to be deleted." +
+		fmt.Sprintf(" QUERY TRANSACTIONS: If the user wants to query or view their transaction history, use the query_transaction tool. Supported time ranges: 'today', 'yesterday', 'this_week', 'last_week', 'this_month', 'last_month', 'last_7_days', 'last_30_days', or 'custom' for specific date ranges. IMPORTANT: When user mentions dates without year (e.g., '12月1日', '1月15日', '12月1号到12月10号'), you MUST infer the current year (%d) and use 'custom' type with full date format 'YYYY-MM-DD hh:mm:ss'. If only date is provided without time, start_time defaults to 00:00:00 and end_time defaults to 23:59:59. The user may also request a specific number of top transactions (e.g., 'top 10', '前10条', '显示前20条'), which you should set in the top_n parameter (default is 5).", currentYear) +
 		" When calling record_transaction, you should provide the original_message parameter with the most relevant user message from the conversation that best represents what the user said about this transaction." +
 		" For thread conversations, extract the most appropriate user message from the conversation history that led to this transaction." +
 		" '叫我XXX' or '我是XXX' means rename to XXX or extract name from the user's introduction." +
@@ -200,6 +205,37 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 				}),
 			},
 		},
+		{
+			Type: openai.ToolTypeFunction,
+			Function: &openai.FunctionDefinition{
+				Name:        "query_transactions",
+				Description: "Query financial transactions within a specified time range. Use this when the user wants to view their transaction history, check spending, or see financial summaries.",
+				Parameters: mustMarshalJSON(map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"time_range_type": map[string]interface{}{
+							"type":        "string",
+							"enum":        []string{"today", "yesterday", "this_week", "last_week", "this_month", "last_month", "last_7_days", "last_30_days", "custom"},
+							"description": fmt.Sprintf("Time range type. Use predefined ranges (today, yesterday, this_week, last_week, this_month, last_month, last_7_days, last_30_days) or 'custom' for specific date ranges. IMPORTANT: When user mentions dates without year (e.g., '12月1日', '1月15日'), you MUST infer the current year (%d) and use 'custom' type with full date format.", currentYear),
+						},
+						"start_time": map[string]string{
+							"type":        "string",
+							"description": fmt.Sprintf("Start time in format 'YYYY-MM-DD hh:mm:ss' (required only if time_range_type is 'custom'). If only date is provided without time, it will default to 00:00:00. MUST include year (e.g., '%d-12-19 00:00:00').", currentYear),
+						},
+						"end_time": map[string]string{
+							"type":        "string",
+							"description": fmt.Sprintf("End time in format 'YYYY-MM-DD hh:mm:ss' (required only if time_range_type is 'custom'). If only date is provided without time, it will default to 23:59:59. MUST include year (e.g., '%d-12-19 23:59:59').", currentYear),
+						},
+						"top_n": map[string]interface{}{
+							"type":        "integer",
+							"description": "Number of top transactions to return (sorted by amount descending). Default is 5. User may request a different number (e.g., 'top 10', '前10条').",
+							"default":     5,
+						},
+					},
+					"required": []string{"time_range_type"},
+				}),
+			},
+		},
 	}
 
 	// 4. Build request
@@ -278,6 +314,8 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 			result, err = s.handleUpdateTransaction(args, billService.(*BillService), input)
 		case "delete_transaction":
 			result, err = s.handleDeleteTransaction(args, billService.(*BillService))
+		case "query_transactions":
+			result, err = s.handleQueryTransactions(args, billService.(*BillService))
 		case "rename_user":
 			result, err = s.handleRenameUser(args, renameService.(*RenameService))
 		default:
@@ -483,6 +521,79 @@ func (s *OpenAIService) handleDeleteTransaction(args map[string]interface{}, svc
 	return fmt.Sprintf("✅ 删除成功！\n🆔 %s", recordID), nil
 }
 
+func (s *OpenAIService) handleQueryTransactions(args map[string]interface{}, svc *BillService) (string, error) {
+	timeRangeTypeStr := getString(args, "time_range_type")
+	if timeRangeTypeStr == "" {
+		s.log.Error("Missing time_range_type in query_transactions args")
+		return "请提供时间范围类型", fmt.Errorf("time_range_type is required")
+	}
+
+	// Parse time range
+	var startTime, endTime time.Time
+	var err error
+
+	timeRangeType := repository.TimeRangeType(timeRangeTypeStr)
+	if timeRangeType == repository.TimeRangeCustom {
+		startTimeStr := getString(args, "start_time")
+		endTimeStr := getString(args, "end_time")
+		if startTimeStr == "" || endTimeStr == "" {
+			s.log.Error("Missing start_time or end_time for custom time range")
+			return "自定义时间范围需要提供开始时间和结束时间", fmt.Errorf("start_time and end_time are required for custom time range")
+		}
+		startTime, endTime, err = repository.ParseTimeRange(timeRangeType, startTimeStr, endTimeStr)
+	} else {
+		startTime, endTime, err = repository.ParseTimeRange(timeRangeType, "", "")
+	}
+
+	if err != nil {
+		s.log.Error("Failed to parse time range: %v", err)
+		return "时间范围解析失败", err
+	}
+
+	// Get top_n (default 5)
+	topN := 5
+	if topNVal, ok := args["top_n"]; ok {
+		if topNFloat, ok := topNVal.(float64); ok {
+			topN = int(topNFloat)
+		}
+	}
+
+	// Query transactions
+	bills, totalIncome, totalExpense, err := svc.QueryTransactions(startTime, endTime, topN)
+	if err != nil {
+		s.log.Error("Failed to query transactions: %v", err)
+		return "查询失败", err
+	}
+
+	// Format response
+	netAmount := totalIncome - totalExpense
+	response := fmt.Sprintf("📊 查询结果（%s 至 %s）\n\n", 
+		startTime.Format("2006-01-02"), endTime.Format("2006-01-02"))
+	response += fmt.Sprintf("💰 总收入: ¥%.2f\n", totalIncome)
+	response += fmt.Sprintf("💸 总支出: ¥%.2f\n", totalExpense)
+	response += fmt.Sprintf("📈 净收支: ¥%.2f\n\n", netAmount)
+
+	if len(bills) > 0 {
+		response += fmt.Sprintf("🔝 Top %d 交易记录:\n", len(bills))
+		for i, bill := range bills {
+			sign := "-"
+			if bill.Type == domain.BillTypeIncome {
+				sign = "+"
+			}
+			response += fmt.Sprintf("%d. %s %s¥%.2f [%s]", 
+				i+1, bill.Description, sign, bill.Amount, bill.Category)
+			if bill.RecordID != "" {
+				response += fmt.Sprintf(" 🆔 %s", bill.RecordID)
+			}
+			response += "\n"
+		}
+	} else {
+		response += "📝 暂无交易记录\n"
+	}
+
+	return response, nil
+}
+
 // BillService handles bill operations inside AI service
 type BillService struct {
 	billUseCase domain.BillUseCase
@@ -546,6 +657,11 @@ func (s *BillService) UpdateBill(recordID string, description *string, amount *f
 // DeleteBill deletes an existing bill by record_id
 func (s *BillService) DeleteBill(recordID string) error {
 	return s.billUseCase.DeleteBill(recordID)
+}
+
+// QueryTransactions queries transactions within a time range
+func (s *BillService) QueryTransactions(startTime, endTime time.Time, topN int) ([]*domain.Bill, float64, float64, error) {
+	return s.billUseCase.QueryTransactions(s.userName, startTime, endTime, topN)
 }
 
 // RenameService handles rename

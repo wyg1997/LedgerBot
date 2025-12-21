@@ -323,6 +323,93 @@ func (s *FeishuService) ListRecordsWithFilter(appToken, tableToken string, filte
 	return nil, fmt.Errorf("ListRecordsWithFilter not yet implemented with SDK")
 }
 
+// SearchRecords 使用 Bitable SDK 搜索记录
+func (s *FeishuService) SearchRecords(appToken, tableID string, startTime, endTime int64, fieldNames []string, pageSize int) ([]map[string]interface{}, int, string, error) {
+	s.log.Debug("Searching bitable records: app_token=%s, table_id=%s, start_time=%d, end_time=%d, page_size=%d", 
+		appToken, tableID, startTime, endTime, pageSize)
+
+	// Build filter conditions for date range
+	conditions := []*larkbitable.Condition{
+		larkbitable.NewConditionBuilder().
+			FieldName(s.config.FieldDate).
+			Operator("isGreater").
+			Value([]string{"ExactDate", fmt.Sprintf("%d", startTime)}).
+			Build(),
+		larkbitable.NewConditionBuilder().
+			FieldName(s.config.FieldDate).
+			Operator("isLess").
+			Value([]string{"ExactDate", fmt.Sprintf("%d", endTime)}).
+			Build(),
+	}
+
+	// Build sort by date descending
+	sorts := []*larkbitable.Sort{
+		larkbitable.NewSortBuilder().
+			FieldName(s.config.FieldDate).
+			Desc(true).
+			Build(),
+	}
+
+	req := larkbitable.NewSearchAppTableRecordReqBuilder().
+		AppToken(appToken).
+		TableId(tableID).
+		PageSize(pageSize).
+		Body(larkbitable.NewSearchAppTableRecordReqBodyBuilder().
+			FieldNames(fieldNames).
+			Sort(sorts).
+			Filter(larkbitable.NewFilterInfoBuilder().
+				Conjunction("and").
+				Conditions(conditions).
+				Build()).
+			AutomaticFields(false).
+			Build()).
+		Build()
+
+	resp, err := s.client.Bitable.V1.AppTableRecord.Search(s.ctx, req)
+	if err != nil {
+		s.log.Error("Search bitable records API call failed: app_token=%s, table_id=%s, error=%v", appToken, tableID, err)
+		return nil, 0, "", fmt.Errorf("search bitable records failed: %w", err)
+	}
+
+	if !resp.Success() {
+		s.log.Error("Search bitable records failed: app_token=%s, table_id=%s, code=%d, msg=%s", appToken, tableID, resp.Code, resp.Msg)
+		return nil, 0, "", fmt.Errorf("search bitable records failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	// Parse response
+	var records []map[string]interface{}
+	var total int
+	var pageToken string
+
+	if resp.Data != nil {
+		if resp.Data.HasMore != nil {
+			// has_more is available
+		}
+		if resp.Data.PageToken != nil {
+			pageToken = *resp.Data.PageToken
+		}
+		if resp.Data.Total != nil {
+			total = int(*resp.Data.Total)
+		}
+		if resp.Data.Items != nil {
+			for _, item := range resp.Data.Items {
+				record := make(map[string]interface{})
+				if item.RecordId != nil {
+					record["_id"] = *item.RecordId
+					record["record_id"] = *item.RecordId
+				}
+				if item.Fields != nil {
+					record["fields"] = item.Fields
+				}
+				records = append(records, record)
+			}
+		}
+	}
+
+	s.log.Debug("Successfully searched bitable records: count=%d, total=%d, app_token=%s, table_id=%s", len(records), total, appToken, tableID)
+	return records, total, pageToken, nil
+}
+
 // GetBitableAppTokenFromWikiNode 根据 wiki node_token 获取对应多维表格的 app_token
 // 通过调用 Wiki.V2.Space.GetNode 接口，读取返回的 node.obj_token 作为 app_token
 func (s *FeishuService) GetBitableAppTokenFromWikiNode(nodeToken string) (string, error) {

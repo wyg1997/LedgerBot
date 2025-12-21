@@ -446,6 +446,74 @@ func (r *bitableBillRepository) GetCategories(userName string) ([]string, error)
 	return []string{}, nil
 }
 
+// QueryTransactions queries transactions within a time range
+func (r *bitableBillRepository) QueryTransactions(userName string, startTime, endTime time.Time, topN int) ([]*domain.Bill, float64, float64, error) {
+	// Convert time to milliseconds timestamp
+	startTimestamp := startTime.UnixMilli()
+	endTimestamp := endTime.UnixMilli()
+
+	// Get all field names
+	fieldNames := []string{
+		r.config.FieldDescription,
+		r.config.FieldAmount,
+		r.config.FieldType,
+		r.config.FieldCategory,
+		r.config.FieldDate,
+		r.config.FieldUserName,
+		r.config.FieldOriginalMsg,
+	}
+
+	// Search records (use a large page size to get all records, then filter by user)
+	records, _, _, err := r.feishuService.SearchRecords(r.appToken, r.tableID, startTimestamp, endTimestamp, fieldNames, 500)
+	if err != nil {
+		r.logger.Error("Failed to query transactions from bitable: %v", err)
+		return nil, 0, 0, fmt.Errorf("failed to query transactions: %v", err)
+	}
+
+	// Convert records to bills and filter by user if specified
+	var bills []*domain.Bill
+	var totalIncome, totalExpense float64
+
+	for _, record := range records {
+		bill, err := r.convertRecordToBill(record)
+		if err != nil {
+			r.logger.Error("Failed to convert record to bill: %v", err)
+			continue
+		}
+
+		// Filter by user if specified
+		if userName != "" && bill.UserName != userName {
+			continue
+		}
+
+		// Calculate totals
+		if bill.Type == domain.BillTypeIncome {
+			totalIncome += bill.Amount
+		} else {
+			totalExpense += bill.Amount
+		}
+
+		bills = append(bills, bill)
+	}
+
+	// Sort by amount descending
+	for i := 0; i < len(bills)-1; i++ {
+		for j := i + 1; j < len(bills); j++ {
+			if bills[i].Amount < bills[j].Amount {
+				bills[i], bills[j] = bills[j], bills[i]
+			}
+		}
+	}
+
+	// Take top N if specified
+	if topN > 0 && topN < len(bills) {
+		bills = bills[:topN]
+	}
+
+	r.logger.Debug("QueryTransactions: found %d bills, total_income=%.2f, total_expense=%.2f", len(bills), totalIncome, totalExpense)
+	return bills, totalIncome, totalExpense, nil
+}
+
 // Helper function to convert interface to float64
 func toFloat64(v interface{}) float64 {
 	switch val := v.(type) {

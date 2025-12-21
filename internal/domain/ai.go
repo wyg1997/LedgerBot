@@ -93,6 +93,7 @@ type BillServiceInterface interface {
 	CreateBill(description string, amount float64, billType BillType, date *time.Time, category string, originalMsg string) (*Bill, error)
 	UpdateBill(recordID string, description *string, amount *float64, billType *BillType, category *string, originalMsg *string) (*Bill, error)
 	DeleteBill(recordID string) error
+	QueryTransactions(startTime, endTime time.Time, topN int) ([]*Bill, float64, float64, error)
 }
 
 // RenameServiceInterface defines functionality for renaming users in AI context
