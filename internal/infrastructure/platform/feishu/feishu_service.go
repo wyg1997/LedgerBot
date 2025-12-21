@@ -286,6 +286,33 @@ func (s *FeishuService) GetRecordToBitable(appToken, tableID, recordID string) (
 	return records[0], nil
 }
 
+// DeleteRecordToBitable 使用 Bitable SDK 删除记录
+func (s *FeishuService) DeleteRecordToBitable(appToken, tableID, recordID string) error {
+	s.log.Debug("Deleting bitable record: app_token=%s, table_id=%s, record_id=%s", appToken, tableID, recordID)
+
+	req := larkbitable.NewBatchDeleteAppTableRecordReqBuilder().
+		AppToken(appToken).
+		TableId(tableID).
+		Body(larkbitable.NewBatchDeleteAppTableRecordReqBodyBuilder().
+			Records([]string{recordID}).
+			Build()).
+		Build()
+
+	resp, err := s.client.Bitable.V1.AppTableRecord.BatchDelete(s.ctx, req)
+	if err != nil {
+		s.log.Error("Delete bitable record API call failed: app_token=%s, table_id=%s, record_id=%s, error=%v", appToken, tableID, recordID, err)
+		return fmt.Errorf("delete bitable record failed: %w", err)
+	}
+
+	if !resp.Success() {
+		s.log.Error("Delete bitable record failed: app_token=%s, table_id=%s, record_id=%s, code=%d, msg=%s", appToken, tableID, recordID, resp.Code, resp.Msg)
+		return fmt.Errorf("delete bitable record failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	s.log.Debug("Successfully deleted bitable record: record_id=%s, app_token=%s, table_id=%s", recordID, appToken, tableID)
+	return nil
+}
+
 func (s *FeishuService) ListRecords(appToken, tableToken string, pageSize, pageToken int) ([]map[string]interface{}, error) {
 	// TODO: Implement with SDK
 	return nil, fmt.Errorf("ListRecords not yet implemented with SDK")

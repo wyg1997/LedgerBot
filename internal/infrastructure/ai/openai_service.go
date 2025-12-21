@@ -56,6 +56,7 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 		" CRITICAL RULE FOR CATEGORY SELECTION: When calling record_transaction, you MUST automatically select a category from the enum list (餐饮, 交通, 购物, 娱乐, 医疗, 教育, 住房, 水电费, 通讯, 服装, 收入, 其它) WITHOUT asking the user. NEVER ask questions like '这是什么分类？', '请选择分类', '这是什么类型的支出？' or any similar questions about category. Just analyze the transaction description and immediately choose the most appropriate category. If you're unsure, use '其它'. This is mandatory - you must always provide a category value, never leave it empty or ask the user to choose." +
 		" MULTIPLE TRANSACTIONS: If the user mentions multiple transactions in a single message (e.g., '午饭30元，打车45元' or '今天花了30块吃饭，45块打车'), you MUST call record_transaction MULTIPLE TIMES - once for each transaction. You can make multiple tool calls in a single response. Each transaction should be recorded separately with its own record_transaction call. Do NOT combine multiple transactions into a single record_transaction call." +
 		" UPDATE TRANSACTIONS: If the user wants to update an existing transaction, use the update_transaction tool. The user will provide the record_id (from the original transaction response, shown as 🆔). You can update one or more fields (description, amount, type, category). If the user mentions multiple updates in a single message, you MUST call update_transaction MULTIPLE TIMES - once for each record that needs to be updated. Only include fields that the user wants to change - do not include unchanged fields. NOTE: The original_message field will be automatically updated with the user's current update instruction - you do NOT need to include it in the tool call." +
+		" DELETE TRANSACTIONS: If the user wants to delete an existing transaction, use the delete_transaction tool. The user will provide the record_id (from the original transaction response, shown as 🆔). If the user mentions multiple deletions in a single message, you MUST call delete_transaction MULTIPLE TIMES - once for each record that needs to be deleted." +
 		" When calling record_transaction, you should provide the original_message parameter with the most relevant user message from the conversation that best represents what the user said about this transaction." +
 		" For thread conversations, extract the most appropriate user message from the conversation history that led to this transaction." +
 		" '叫我XXX' or '我是XXX' means rename to XXX or extract name from the user's introduction." +
@@ -182,6 +183,23 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 				}),
 			},
 		},
+		{
+			Type: openai.ToolTypeFunction,
+			Function: &openai.FunctionDefinition{
+				Name:        "delete_transaction",
+				Description: "Delete an existing financial transaction record. Use this when the user wants to remove a previously recorded transaction. You need the record_id from the original transaction record.",
+				Parameters: mustMarshalJSON(map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"record_id": map[string]string{
+							"type":        "string",
+							"description": "The record_id of the transaction to delete (from the original record response, shown as 🆔)",
+						},
+					},
+					"required": []string{"record_id"},
+				}),
+			},
+		},
 	}
 
 	// 4. Build request
@@ -258,6 +276,8 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 		case "update_transaction":
 			// Pass current input so we can use it as original_message for updates
 			result, err = s.handleUpdateTransaction(args, billService.(*BillService), input)
+		case "delete_transaction":
+			result, err = s.handleDeleteTransaction(args, billService.(*BillService))
 		case "rename_user":
 			result, err = s.handleRenameUser(args, renameService.(*RenameService))
 		default:
@@ -447,6 +467,22 @@ func (s *OpenAIService) handleUpdateTransaction(args map[string]interface{}, svc
 	return response, nil
 }
 
+func (s *OpenAIService) handleDeleteTransaction(args map[string]interface{}, svc *BillService) (string, error) {
+	recordID := getString(args, "record_id")
+	if recordID == "" {
+		s.log.Error("Missing record_id in delete_transaction args")
+		return "请提供记录ID", fmt.Errorf("record_id is required")
+	}
+
+	err := svc.DeleteBill(recordID)
+	if err != nil {
+		s.log.Error("Failed to delete bill: %v", err)
+		return "删除失败", err
+	}
+
+	return fmt.Sprintf("✅ 删除成功！\n🆔 %s", recordID), nil
+}
+
 // BillService handles bill operations inside AI service
 type BillService struct {
 	billUseCase domain.BillUseCase
@@ -505,6 +541,11 @@ func (s *BillService) UpdateBill(recordID string, description *string, amount *f
 	updatedBill.RecordID = recordID
 	
 	return updatedBill, nil
+}
+
+// DeleteBill deletes an existing bill by record_id
+func (s *BillService) DeleteBill(recordID string) error {
+	return s.billUseCase.DeleteBill(recordID)
 }
 
 // RenameService handles rename

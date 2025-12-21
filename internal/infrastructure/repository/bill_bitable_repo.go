@@ -296,11 +296,36 @@ func (r *bitableBillRepository) UpdateBill(bill *domain.Bill) error {
 
 // DeleteBill deletes a bill from bitable
 func (r *bitableBillRepository) DeleteBill(id string) error {
-	// In bitable, we would need to:
-	// 1. Find the record by bill ID
-	// 2. Delete the record
-	// This requires implementing delete functionality in FeishuService
-	return fmt.Errorf("delete bill not implemented for bitable storage")
+	// If id is a record_id (starts with "rec"), delete directly by record_id
+	if len(id) >= 3 && id[:3] == "rec" {
+		err := r.feishuService.DeleteRecordToBitable(r.appToken, r.tableID, id)
+		if err != nil {
+			r.logger.Error("Failed to delete bill in bitable: %v", err)
+			return fmt.Errorf("failed to delete bill: %v", err)
+		}
+		r.logger.Info("Deleted bill in bitable: RecordID=%s", id)
+		return nil
+	}
+
+	// For other IDs, we need to find the record first
+	// This is less efficient but maintains backward compatibility
+	bill, err := r.GetBill(id)
+	if err != nil {
+		return fmt.Errorf("failed to get bill for deletion: %v", err)
+	}
+
+	if bill.RecordID == "" {
+		return fmt.Errorf("record_id not found for bill: %s", id)
+	}
+
+	err = r.feishuService.DeleteRecordToBitable(r.appToken, r.tableID, bill.RecordID)
+	if err != nil {
+		r.logger.Error("Failed to delete bill in bitable: %v", err)
+		return fmt.Errorf("failed to delete bill: %v", err)
+	}
+
+	r.logger.Info("Deleted bill in bitable: RecordID=%s, BillID=%s", bill.RecordID, id)
+	return nil
 }
 
 // ListBills lists bills with filtering
