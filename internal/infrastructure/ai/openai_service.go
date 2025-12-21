@@ -54,6 +54,7 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 	systemPrompt += " Always decide expense vs income based on description context when recording transactions." +
 		" When recording transactions, the date is automatically set to the current date by the server, so you should NOT ask for or use date information from the user." +
 		" CRITICAL RULE FOR CATEGORY SELECTION: When calling record_transaction, you MUST automatically select a category from the enum list (餐饮, 交通, 购物, 娱乐, 医疗, 教育, 住房, 水电费, 通讯, 服装, 收入, 其它) WITHOUT asking the user. NEVER ask questions like '这是什么分类？', '请选择分类', '这是什么类型的支出？' or any similar questions about category. Just analyze the transaction description and immediately choose the most appropriate category. If you're unsure, use '其它'. This is mandatory - you must always provide a category value, never leave it empty or ask the user to choose." +
+		" MULTIPLE TRANSACTIONS: If the user mentions multiple transactions in a single message (e.g., '午饭30元，打车45元' or '今天花了30块吃饭，45块打车'), you MUST call record_transaction MULTIPLE TIMES - once for each transaction. You can make multiple tool calls in a single response. Each transaction should be recorded separately with its own record_transaction call. Do NOT combine multiple transactions into a single record_transaction call." +
 		" When calling record_transaction, you should provide the original_message parameter with the most relevant user message from the conversation that best represents what the user said about this transaction." +
 		" For thread conversations, extract the most appropriate user message from the conversation history that led to this transaction." +
 		" '叫我XXX' or '我是XXX' means rename to XXX or extract name from the user's introduction." +
@@ -166,12 +167,25 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 	choice := resp.Choices[0]
 	msg := choice.Message
 
+	// Debug: Print full AI response
+	s.log.Debug("AI response received: role=%s, content=%s, toolCallsCount=%d", msg.Role, msg.Content, len(msg.ToolCalls))
+	if len(msg.ToolCalls) > 0 {
+		for i, tc := range msg.ToolCalls {
+			s.log.Debug("ToolCall[%d]: id=%s, type=%s, function.name=%s, function.arguments=%s",
+				i, tc.ID, tc.Type, tc.Function.Name, tc.Function.Arguments)
+		}
+	}
+
 	// 6. No tool call: return assistant reply directly
 	if len(msg.ToolCalls) == 0 {
 		return msg.Content, nil
 	}
 
 	// 7. Handle tool calls locally (record_transaction / rename_user)
+	// Support multiple toolcalls - process all and return combined result
+	var results []string
+	var hasError bool
+
 	for _, tc := range msg.ToolCalls {
 		fn := tc.Function
 		if fn.Name == "" {
@@ -182,7 +196,9 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 		var args map[string]interface{}
 		if err := json.Unmarshal([]byte(fn.Arguments), &args); err != nil {
 			s.log.Error("parse tool args: %v", err)
-			return "抱歉，参数解析失败", err
+			results = append(results, fmt.Sprintf("❌ %s: 参数解析失败", name))
+			hasError = true
+			continue
 		}
 
 		s.log.Info("AI toolcall triggered: tool=%s, user=%s, args=%+v", name, userName, args)
@@ -193,15 +209,51 @@ func (s *OpenAIService) Execute(input string, userName string, billService domai
 			return "我还不知道您是谁？请告诉我您的称呼。\n您可以直接说：我是张三", nil
 		}
 
+		var result string
+		var err error
+
 		switch name {
 		case "record_transaction":
-			return s.handleRecordTransaction(args, billService.(*BillService))
+			result, err = s.handleRecordTransaction(args, billService.(*BillService))
 		case "rename_user":
-			return s.handleRenameUser(args, renameService.(*RenameService))
+			result, err = s.handleRenameUser(args, renameService.(*RenameService))
+		default:
+			s.log.Error("Unknown tool call: %s", name)
+			results = append(results, fmt.Sprintf("❌ 未知操作: %s", name))
+			hasError = true
+			continue
+		}
+
+		if err != nil {
+			s.log.Error("Tool call %s failed: %v", name, err)
+			results = append(results, fmt.Sprintf("❌ %s 执行失败: %v", name, err))
+			hasError = true
+		} else {
+			results = append(results, result)
 		}
 	}
 
-	return "未知操作", fmt.Errorf("unknown tool call")
+	// Return combined results
+	if len(results) == 0 {
+		return "未知操作", fmt.Errorf("no valid tool calls")
+	}
+
+	// If all succeeded, join with double newlines for better separation; if any failed, indicate error
+	response := ""
+	if hasError {
+		response = "部分操作完成：\n" + fmt.Sprintf("%s\n", results[0])
+		for i := 1; i < len(results); i++ {
+			response += results[i] + "\n"
+		}
+	} else {
+		// Multiple successful transactions: separate with double newlines
+		response = results[0]
+		for i := 1; i < len(results); i++ {
+			response += "\n\n" + results[i]
+		}
+	}
+
+	return response, nil
 }
 
 // mustMarshalJSON is a small helper to build json.RawMessage
