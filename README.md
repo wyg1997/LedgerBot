@@ -2,6 +2,8 @@
 
 一个基于飞书平台和多维表格的智能记账机器人，**对自然语言非常友好**，支持自然语言输入和AI自动分类。
 
+![功能演示](./docs/assets/feature-demo.jpg)
+
 ## 功能特性
 
 - 🤖 **AI智能识别**: 使用OpenAI GPT模型自动识别账单信息
@@ -28,7 +30,7 @@ cp .env.example .env
 
 1. 在飞书打开你的多维表格
 2. 复制浏览器地址栏的完整URL
-3. URL格式应该类似于：`https://example.feishu.cn/base/APP_TOKEN?table=TABLE_TOKEN`
+3. URL格式应该类似于：`https://example.feishu.cn/wiki/WIKI_ID?table=TABLE_TOKEN`
 
 ### 3. 多维表格字段设置
 
@@ -85,10 +87,13 @@ FEISHU_APP_SECRET=你的app_secret
 FEISHU_BOT_NAME=记账管家  # Bot名称，用于识别@提及（可选，默认为"记账管家"）
 
 # 只需复制完整的飞书多维表格URL！
-FEISHU_BITABLE_URL=https://example.feishu.cn/base/YOUR_APP_TOKEN?table=YOUR_TABLE_TOKEN
+FEISHU_BITABLE_URL=https://example.feishu.cn/wiki/YOUR_WIKI_ID?table=YOUR_TABLE_TOKEN
 
-# AI配置
-AI_API_KEY=你的openai_api_key
+# AI配置（SiliconFlow）
+# 获取 API Key 和模型：https://cloud.siliconflow.cn/me/models
+AI_API_KEY=你的siliconflow_api_key
+AI_BASE_URL=https://api.siliconflow.cn
+AI_MODEL=Pro/deepseek-ai/DeepSeek-V3.2
 ```
 
 ### 如何使用多维表格URL
@@ -96,7 +101,7 @@ AI_API_KEY=你的openai_api_key
 1. 在飞书中打开你的多维表格
 2. 复制浏览器地址栏的完整URL，像这样：
    ```
-   https://example.feishu.cn/base/VLqDbQT7LaW4vQsccA5cPIVQnOf?table=tblxI2XhCqNJ7VCI
+   https://example.feishu.cn/wiki/DCS8wQccqiL2HckWUc5cImPQnmh?table=tbl66XZkIrPYtW2e&view=vew259lbyd
    ```
 3. 直接粘贴这个URL到配置文件即可！
 
@@ -218,9 +223,9 @@ FEISHU_FIELD_ORIGINAL_MSG=原始消息
 | FEISHU_APP_SECRET | 飞书应用密钥 | 必填 |
 | FEISHU_BOT_NAME | Bot名称，用于识别@提及 | 记账管家 |
 | FEISHU_BITABLE_URL | 飞书多维表格完整URL | 必填 |
-| AI_API_KEY | OpenAI API密钥 | 必填 |
-| AI_BASE_URL | AI服务基础URL（可选，用于自定义API端点） | - |
-| AI_MODEL | AI模型名称 | gpt-4o |
+| AI_API_KEY | SiliconFlow API密钥 | 必填 |
+| AI_BASE_URL | AI服务基础URL | https://api.siliconflow.cn |
+| AI_MODEL | AI模型名称 | Pro/deepseek-ai/DeepSeek-V3.2 |
 | SERVER_PORT | 服务端口号 | 8080 |
 | USER_MAPPING_FILE | 用户映射文件路径 | ./data/user_mapping.json |
 | LOG_LEVEL | 日志级别 | info |
@@ -231,8 +236,10 @@ FEISHU_FIELD_ORIGINAL_MSG=原始消息
 ```bash
 export FEISHU_APP_ID="your_app_id"
 export FEISHU_APP_SECRET="your_app_secret"
-export FEISHU_BITABLE_URL="https://example.feishu.cn/base/APP_TOKEN?table=TABLE_TOKEN"
-export AI_API_KEY="your_openai_api_key"
+export FEISHU_BITABLE_URL="https://example.feishu.cn/wiki/WIKI_ID?table=TABLE_TOKEN"
+export AI_API_KEY="your_siliconflow_api_key"
+export AI_BASE_URL="https://api.siliconflow.cn"
+export AI_MODEL="Pro/deepseek-ai/DeepSeek-V3.2"
 go run main.go
 ```
 
