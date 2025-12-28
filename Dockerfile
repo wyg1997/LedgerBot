@@ -1,7 +1,7 @@
 # 多阶段构建 Dockerfile for LedgerBot
 
 # 第一阶段：构建阶段
-FROM golang:1.21-alpine AS builder
+FROM docker.1ms.run/golang:1.21-alpine AS builder
 
 # 安装必要的构建工具
 RUN apk add --no-cache git ca-certificates tzdata
@@ -13,7 +13,7 @@ WORKDIR /build
 COPY go.mod go.sum ./
 
 # 下载依赖
-RUN go mod download
+RUN go env -w GOPROXY=https://mirrors.aliyun.com/goproxy/,direct && go mod download
 
 # 复制源代码
 COPY . .
