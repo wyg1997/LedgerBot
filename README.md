@@ -4,6 +4,8 @@
 
 ![功能演示](./docs/assets/feature-demo.jpg)
 
+> 📖 **部署文档**：详细的部署步骤请参考 [部署文档](./docs/deployment.md)
+
 ## 功能特性
 
 - 🤖 **AI智能识别**: 使用OpenAI GPT模型自动识别账单信息
